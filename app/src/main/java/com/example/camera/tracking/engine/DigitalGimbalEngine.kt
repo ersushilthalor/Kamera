@@ -52,6 +52,11 @@ class DigitalGimbalEngine(context: Context) : SensorEventListener {
 
     // Instantaneous stabilization offsets in normalized space [-0.25..0.25]
     @Volatile
+    private var targetShiftX = 0f
+    @Volatile
+    private var targetShiftY = 0f
+
+    @Volatile
     var offsetX: Float = 0f
         private set
 
@@ -114,6 +119,8 @@ class DigitalGimbalEngine(context: Context) : SensorEventListener {
     }
 
     fun reset() {
+        targetShiftX = 0f
+        targetShiftY = 0f
         offsetX = 0f
         offsetY = 0f
         pitchAngle = 0f
@@ -133,16 +140,19 @@ class DigitalGimbalEngine(context: Context) : SensorEventListener {
                         val pitchVelocity = event.values[0]
                         val rollVelocity = event.values[1]
                         if (pitchVelocity.isFinite() && rollVelocity.isFinite()) {
-                            // Inverse counter-shift: mobile shakes UP -> shift crop DOWN
-                            val shiftY = -pitchVelocity * BASE_GYRO_GAIN * sensitivity * dt * 25f
-                            // Mobile shakes RIGHT -> shift crop LEFT
-                            val shiftX = -rollVelocity * BASE_GYRO_GAIN * sensitivity * dt * 25f
+                            // Deadzone filter for gyro sensor noise to prevent micro-jitter
+                            val cleanPitch = if (kotlin.math.abs(pitchVelocity) > 0.12f) pitchVelocity else 0f
+                            val cleanRoll = if (kotlin.math.abs(rollVelocity) > 0.12f) rollVelocity else 0f
 
-                            val newX = (offsetX + shiftX) * DECAY_FACTOR
-                            val newY = (offsetY + shiftY) * DECAY_FACTOR
+                            if (cleanPitch != 0f || cleanRoll != 0f) {
+                                // Inverse counter-shift: mobile shakes UP -> shift crop DOWN
+                                val shiftY = -cleanPitch * BASE_GYRO_GAIN * sensitivity * dt * 8f
+                                // Mobile shakes RIGHT -> shift crop LEFT
+                                val shiftX = -cleanRoll * BASE_GYRO_GAIN * sensitivity * dt * 8f
 
-                            if (newX.isFinite()) offsetX = newX.coerceIn(-0.25f, 0.25f)
-                            if (newY.isFinite()) offsetY = newY.coerceIn(-0.25f, 0.25f)
+                                targetShiftX = (targetShiftX + shiftX).coerceIn(-0.12f, 0.12f)
+                                targetShiftY = (targetShiftY + shiftY).coerceIn(-0.12f, 0.12f)
+                            }
                         }
                     }
                     lastGyroTimestamp = now
@@ -176,6 +186,8 @@ class DigitalGimbalEngine(context: Context) : SensorEventListener {
      */
     fun updateFrame(dtSec: Float): GimbalState {
         if (!isEnabled) {
+            targetShiftX = 0f
+            targetShiftY = 0f
             offsetX *= 0.8f
             offsetY *= 0.8f
             return GimbalState(isEnabled = false)
@@ -183,24 +195,32 @@ class DigitalGimbalEngine(context: Context) : SensorEventListener {
 
         val dt = if (dtSec.isFinite() && dtSec > 0f) dtSec.coerceIn(0.005f, 0.1f) else 0.033f
 
-        if (isSimulatingShake || gyroscope == null) {
-            // High frequency simulated shake when physical gyro is absent or during test bench shake test
+        if (isSimulatingShake) {
+            // High frequency simulated shake ONLY during deliberate test bench shake test
             simTime += dt
             val fastShakeX = sin(simTime * 18f) * 0.08f + sin(simTime * 34f) * 0.04f
             val fastShakeY = sin(simTime * 22f + 1.2f) * 0.07f + sin(simTime * 41f) * 0.03f
 
             // The gimbal counter-acts this shake inversely
-            offsetX = (-fastShakeX * sensitivity * 0.75f).coerceIn(-0.22f, 0.22f)
-            offsetY = (-fastShakeY * sensitivity * 0.75f).coerceIn(-0.22f, 0.22f)
+            offsetX = (-fastShakeX * sensitivity * 0.75f).coerceIn(-0.15f, 0.15f)
+            offsetY = (-fastShakeY * sensitivity * 0.75f).coerceIn(-0.15f, 0.15f)
 
             pitchAngle = (sin(simTime * 4f) * 5f).coerceIn(-30f, 30f)
             rollAngle = (sin(simTime * 3.5f) * 6f).coerceIn(-45f, 45f)
         } else {
-            // Natural spring return when stationary
-            val newX = offsetX * DECAY_FACTOR
-            val newY = offsetY * DECAY_FACTOR
-            offsetX = if (newX.isFinite()) newX.coerceIn(-0.25f, 0.25f) else 0f
-            offsetY = if (newY.isFinite()) newY.coerceIn(-0.25f, 0.25f) else 0f
+            // Smoothly interpolate towards sensor target shift to eliminate all steppiness & jitter
+            val blend = (1f - kotlin.math.exp(-10f * dt)).coerceIn(0.05f, 0.35f)
+            offsetX += (targetShiftX - offsetX) * blend
+            offsetY += (targetShiftY - offsetY) * blend
+
+            // Natural center recovery spring
+            targetShiftX *= DECAY_FACTOR
+            targetShiftY *= DECAY_FACTOR
+            offsetX *= DECAY_FACTOR
+            offsetY *= DECAY_FACTOR
+
+            if (kotlin.math.abs(offsetX) < 0.0002f) offsetX = 0f
+            if (kotlin.math.abs(offsetY) < 0.0002f) offsetY = 0f
         }
 
         val safeOffsetX = if (offsetX.isFinite()) offsetX else 0f

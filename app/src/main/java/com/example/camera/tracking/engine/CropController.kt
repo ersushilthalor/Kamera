@@ -37,6 +37,8 @@ class CropController(
     // Digital Gimbal real-time inverse compensation offsets
     var gimbalOffsetX: Float = 0f
     var gimbalOffsetY: Float = 0f
+    private var smoothGimbalX: Float = 0f
+    private var smoothGimbalY: Float = 0f
 
     // Cinematic Pan Configuration
     var isCinematicPanActive: Boolean = false
@@ -121,36 +123,54 @@ class CropController(
                 onCinematicPanFinished?.invoke()
             }
         } else {
-            // Standard Subject Tracking Mode with user-configured Tracking Intensity
-            // 2. Clamp target center strictly inside valid source frame boundaries
+            // Standard Subject Tracking Mode with rock-solid stability and zero micro-jitter
             val clampedTargetX = targetCenterX.coerceIn(halfW, 1f - halfW)
             val clampedTargetY = targetCenterY.coerceIn(halfH, 1f - halfH)
 
-            // 3. Distance to target
-            val dist = hypot((clampedTargetX - currentCenterX).toDouble(), (clampedTargetY - currentCenterY).toDouble()).toFloat()
+            // Generous deadzone box: prevents preview & recorded video from vibrating or bobbing up and down
+            val diffX = clampedTargetX - currentCenterX
+            val diffY = clampedTargetY - currentCenterY
 
-            // 4. Critically damped exponential smoothing:
-            // k scales with user's Tracking Intensity.
-            // Mathematically guaranteed to NEVER overshoot or oscillate at high speeds!
-            val k = (7.5f * trackingIntensity.coerceIn(0.5f, 3.5f)).coerceIn(3.5f, 26f)
-            val blend = (1f - kotlin.math.exp(-k * dt).toFloat()).coerceIn(0.05f, 0.98f)
+            val deadzoneX = 0.020f
+            val deadzoneY = 0.028f // Generous vertical deadzone so vertical posture/breathing oscillations don't shake the frame
 
-            // Sub-pixel deadzone to prevent micro-jitter when stationary
-            val deadzone = 0.0008f
-            if (dist > deadzone) {
-                currentCenterX += (clampedTargetX - currentCenterX) * blend
-                currentCenterY += (clampedTargetY - currentCenterY) * blend
+            val effectiveDiffX = when {
+                diffX > deadzoneX -> diffX - deadzoneX
+                diffX < -deadzoneX -> diffX + deadzoneX
+                else -> 0f
+            }
+
+            val effectiveDiffY = when {
+                diffY > deadzoneY -> diffY - deadzoneY
+                diffY < -deadzoneY -> diffY + deadzoneY
+                else -> 0f
+            }
+
+            val effectiveDist = hypot(effectiveDiffX.toDouble(), effectiveDiffY.toDouble()).toFloat()
+
+            if (effectiveDist > 0f) {
+                // Adaptive progressive tracking: buttery smooth for normal motion, responsive for fast moves
+                val speedFactor = (1.0f + effectiveDist * 8.0f).coerceIn(1.0f, 3.5f)
+                val k = (4.5f * trackingIntensity.coerceIn(0.5f, 2.5f) * speedFactor).coerceIn(2.5f, 15f)
+                val blend = (1f - kotlin.math.exp(-k * dt).toFloat()).coerceIn(0.02f, 0.40f)
+
+                currentCenterX += effectiveDiffX * blend
+                currentCenterY += effectiveDiffY * blend
             }
         }
 
-        // Apply Digital Gimbal inverse compensation offsets directly to center
+        // Apply Digital Gimbal inverse compensation offsets smoothly without twitching
         val safeGimbalX = if (gimbalOffsetX.isFinite()) gimbalOffsetX else 0f
         val safeGimbalY = if (gimbalOffsetY.isFinite()) gimbalOffsetY else 0f
         val safeCenterX = if (currentCenterX.isFinite()) currentCenterX else 0.5f
         val safeCenterY = if (currentCenterY.isFinite()) currentCenterY else 0.5f
 
-        val stabilizedCenterX = (safeCenterX + safeGimbalX).coerceIn(halfW, 1f - halfW)
-        val stabilizedCenterY = (safeCenterY + safeGimbalY).coerceIn(halfH, 1f - halfH)
+        val gimbalBlend = (dt * 12f).coerceIn(0.1f, 0.6f)
+        smoothGimbalX += (safeGimbalX - smoothGimbalX) * gimbalBlend
+        smoothGimbalY += (safeGimbalY - smoothGimbalY) * gimbalBlend
+
+        val stabilizedCenterX = (safeCenterX + smoothGimbalX).coerceIn(halfW, 1f - halfW)
+        val stabilizedCenterY = (safeCenterY + smoothGimbalY).coerceIn(halfH, 1f - halfH)
 
         val left = (stabilizedCenterX - halfW).coerceIn(0f, (1f - cropWidth).coerceAtLeast(0f))
         val top = (stabilizedCenterY - halfH).coerceIn(0f, (1f - cropHeight).coerceAtLeast(0f))
@@ -214,5 +234,7 @@ class CropController(
         targetCenterY = currentCenterY
         velocityX = 0f
         velocityY = 0f
+        smoothGimbalX = 0f
+        smoothGimbalY = 0f
     }
 }

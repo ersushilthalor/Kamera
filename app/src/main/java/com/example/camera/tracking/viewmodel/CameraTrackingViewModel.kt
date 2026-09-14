@@ -10,6 +10,7 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.viewModelScope
+import com.example.camera.data.CameraPreferences
 import com.example.camera.tracking.camera.CameraXManager
 import com.example.camera.tracking.engine.AspectRatioCropEngine
 import com.example.camera.tracking.engine.CropController
@@ -48,7 +49,15 @@ class CameraTrackingViewModel(application: Application) : AndroidViewModel(appli
         private const val TAG = "CameraTrackingVM"
     }
 
-    private val _uiState = MutableStateFlow(CameraTrackingUiState())
+    private val preferences = CameraPreferences(application.applicationContext)
+    private val initialLens = preferences.trackingLens
+
+    private val _uiState = MutableStateFlow(
+        CameraTrackingUiState(
+            selectedLens = initialLens,
+            isFrontCamera = initialLens.isFront
+        )
+    )
     val uiState: StateFlow<CameraTrackingUiState> = _uiState.asStateFlow()
 
     // Engines
@@ -117,8 +126,17 @@ class CameraTrackingViewModel(application: Application) : AndroidViewModel(appli
         )
         cameraXManager = manager
         manager.setFps(_uiState.value.selectedFpsOption)
-        _uiState.update { it.copy(availableLenses = manager.getAvailableLenses()) }
-        manager.startCamera(lens = _uiState.value.selectedLens)
+        val available = manager.getAvailableLenses()
+        val preferredLens = preferences.trackingLens
+        val targetLens = if (available.contains(preferredLens)) preferredLens else TrackingCameraLens.WIDE
+        _uiState.update {
+            it.copy(
+                availableLenses = available,
+                selectedLens = targetLens,
+                isFrontCamera = targetLens.isFront
+            )
+        }
+        manager.startCamera(lens = targetLens)
     }
 
     private fun startSmoothingLoop() {
@@ -417,7 +435,16 @@ class CameraTrackingViewModel(application: Application) : AndroidViewModel(appli
     }
 
     fun flipCamera() {
-        val nextLens = if (_uiState.value.selectedLens.isFront) TrackingCameraLens.WIDE else TrackingCameraLens.FRONT
+        val nextLens = if (_uiState.value.selectedLens.isFront) {
+            val saved = preferences.trackingLens
+            if (saved == TrackingCameraLens.ULTRAWIDE && _uiState.value.availableLenses.contains(TrackingCameraLens.ULTRAWIDE)) {
+                TrackingCameraLens.ULTRAWIDE
+            } else {
+                TrackingCameraLens.WIDE
+            }
+        } else {
+            TrackingCameraLens.FRONT
+        }
         setCameraLens(nextLens)
     }
 
@@ -426,6 +453,7 @@ class CameraTrackingViewModel(application: Application) : AndroidViewModel(appli
             android.util.Log.w("CameraTrackingViewModel", "Requested lens $lens is not available on this device")
             return
         }
+        preferences.trackingLens = lens
         // Smoothly unlock tracking to cleanly reorient tracking and crop bounds to new physical sensor
         unlockTracking()
         _uiState.update { it.copy(selectedLens = lens, isFrontCamera = lens.isFront) }

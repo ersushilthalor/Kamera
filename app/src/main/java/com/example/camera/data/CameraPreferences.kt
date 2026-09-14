@@ -46,7 +46,20 @@ class CameraPreferences(context: Context) {
         private const val KEY_REFOCUS_FRAME_COUNT = "pref_refocus_frame_count"
         private const val KEY_HQ_ZOOM_ENABLED = "pref_hq_zoom_enabled"
         private const val KEY_ZOOM_PROCESSING_QUALITY = "pref_zoom_processing_quality"
+        private const val KEY_TRACKING_LENS = "pref_tracking_lens"
     }
+
+    var trackingLens: com.example.camera.tracking.model.TrackingCameraLens
+        get() {
+            val name = prefs.getString(KEY_TRACKING_LENS, com.example.camera.tracking.model.TrackingCameraLens.WIDE.name)
+                ?: com.example.camera.tracking.model.TrackingCameraLens.WIDE.name
+            return try {
+                com.example.camera.tracking.model.TrackingCameraLens.valueOf(name)
+            } catch (e: Exception) {
+                com.example.camera.tracking.model.TrackingCameraLens.WIDE
+            }
+        }
+        set(value) = prefs.edit().putString(KEY_TRACKING_LENS, value.name).apply()
 
     var isHighQualityZoomEnabled: Boolean
         get() = prefs.getBoolean(KEY_HQ_ZOOM_ENABLED, true)

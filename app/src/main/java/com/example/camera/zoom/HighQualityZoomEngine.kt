@@ -7,6 +7,7 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
@@ -585,6 +586,22 @@ class HighQualityZoomEngine(private val context: Context) {
                 context.contentResolver.openOutputStream(uri)?.use { out ->
                     bitmap.compress(Bitmap.CompressFormat.JPEG, 98, out)
                 }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    try {
+                        context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
+                            val exif = android.media.ExifInterface(pfd.fileDescriptor)
+                            exif.setAttribute(
+                                android.media.ExifInterface.TAG_ORIENTATION,
+                                android.media.ExifInterface.ORIENTATION_NORMAL.toString()
+                            )
+                            exif.saveAttributes()
+                        }
+                    } catch (exifError: Exception) {
+                        Log.w(TAG, "Failed setting EXIF orientation: ${exifError.message}")
+                    }
+                }
+
                 values.clear()
                 values.put(MediaStore.Images.Media.IS_PENDING, 0)
                 context.contentResolver.update(uri, values, null, null)

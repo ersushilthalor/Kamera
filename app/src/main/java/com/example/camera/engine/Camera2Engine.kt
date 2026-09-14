@@ -2587,17 +2587,57 @@ class Camera2Engine(private val context: Context) {
 
             engineScope.launch(Dispatchers.IO) {
                 try {
-                    val rawBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    val options = BitmapFactory.Options().apply {
+                        inMutable = true
+                        inSampleSize = 1
+                        inPreferredConfig = Bitmap.Config.ARGB_8888
+                    }
+                    val rawBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
                     if (rawBitmap != null) {
                         val activeLens = _selectedLens.value
                         val isFrontFacing = activeLens?.facing == CameraCharacteristics.LENS_FACING_FRONT
-                        val orientedBitmap = if (isFrontFacing && saveSelfieAsPreviewed) {
-                            val matrix = Matrix()
-                            if (rawBitmap.width > rawBitmap.height) matrix.postRotate(270f)
+
+                        val exif = try {
+                            android.media.ExifInterface(java.io.ByteArrayInputStream(bytes))
+                        } catch (e: Exception) {
+                            null
+                        }
+                        val exifOrientation = exif?.getAttributeInt(
+                            android.media.ExifInterface.TAG_ORIENTATION,
+                            android.media.ExifInterface.ORIENTATION_UNDEFINED
+                        ) ?: android.media.ExifInterface.ORIENTATION_UNDEFINED
+
+                        val matrix = Matrix()
+                        when (exifOrientation) {
+                            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+                            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+                            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+                            android.media.ExifInterface.ORIENTATION_NORMAL -> {
+                                // Already physically oriented upright by the camera HAL / JPEG encoder. Do not rotate again.
+                            }
+                            else -> {
+                                // Only when EXIF orientation tag is not present or undefined:
+                                if (rawBitmap.width > rawBitmap.height && rotationDeg != 0) {
+                                    matrix.postRotate(rotationDeg.toFloat())
+                                } else if (rawBitmap.width > rawBitmap.height) {
+                                    val rot = if (isFrontFacing) 270f else 90f
+                                    matrix.postRotate(rot)
+                                }
+                            }
+                        }
+
+                        if (isFrontFacing && saveSelfieAsPreviewed) {
                             matrix.postScale(-1f, 1f)
-                            val mirrored = Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.width, rawBitmap.height, matrix, true)
-                            if (mirrored != rawBitmap) rawBitmap.recycle()
-                            mirrored
+                        }
+
+                        val orientedBitmap = if (!matrix.isIdentity) {
+                            val transformed = Bitmap.createBitmap(
+                                rawBitmap, 0, 0, rawBitmap.width, rawBitmap.height, matrix, true
+                            )
+                            if (transformed != rawBitmap) {
+                                rawBitmap.recycle()
+                            }
+                            transformed
                         } else {
                             rawBitmap
                         }
@@ -2696,6 +2736,15 @@ class Camera2Engine(private val context: Context) {
                 _isCapturing.value = false
                 _isZoomProcessing.value = false
                 _zoomProgress.value = 1.0f
+
+                if (finalUri != null) {
+                    _lastCapturedMedia.value = CapturedMedia(
+                        uri = finalUri,
+                        isVideo = false,
+                        timestamp = System.currentTimeMillis(),
+                        displayName = "ZOOM_${System.currentTimeMillis()}.jpg"
+                    )
+                }
 
                 withContext(Dispatchers.Main) {
                     onComplete(finalUri)
