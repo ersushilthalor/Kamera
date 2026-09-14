@@ -3,10 +3,6 @@ package com.example.camera.ui
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.hardware.Sensor
-import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
-import android.hardware.SensorManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -21,7 +17,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -30,13 +25,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.FilterTiltShift
-import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -46,7 +39,6 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -86,13 +78,6 @@ fun InteractiveRefocusViewer(
     // Focus state (0.0 = Near, 1.0 = Far/Deep)
     val focusAnimatable = remember { Animatable(0.5f) }
     var targetFocusValue by remember { mutableFloatStateOf(0.5f) }
-
-    // 3D Parallax state
-    var is3DParallaxActive by remember { mutableStateOf(false) }
-    var sensorTiltX by remember { mutableFloatStateOf(0f) }
-    var sensorTiltY by remember { mutableFloatStateOf(0f) }
-    var touchParallaxX by remember { mutableFloatStateOf(0f) }
-    var touchParallaxY by remember { mutableFloatStateOf(0f) }
 
     // Tap indicator
     var tapLocation by remember { mutableStateOf<Offset?>(null) }
@@ -136,45 +121,6 @@ fun InteractiveRefocusViewer(
         }
     }
 
-    // Hardware tilt sensor for 3D Parallax
-    DisposableEffect(is3DParallaxActive) {
-        if (!is3DParallaxActive) return@DisposableEffect onDispose {}
-
-        val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
-        val sensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
-            ?: sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-
-        val listener = object : SensorEventListener {
-            override fun onSensorChanged(event: SensorEvent?) {
-                if (event == null) return
-                if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
-                    val rotationMatrix = FloatArray(9)
-                    SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
-                    val orientation = FloatArray(3)
-                    SensorManager.getOrientation(rotationMatrix, orientation)
-                    // orientation[2] is roll (X tilt), orientation[1] is pitch (Y tilt)
-                    val targetX = (orientation[2] * 1.5f).coerceIn(-1f, 1f)
-                    val targetY = (orientation[1] * 1.5f).coerceIn(-1f, 1f)
-                    sensorTiltX = sensorTiltX * 0.85f + targetX * 0.15f
-                    sensorTiltY = sensorTiltY * 0.85f + targetY * 0.15f
-                } else if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
-                    val ax = (event.values[0] / 9.8f).coerceIn(-1f, 1f)
-                    val ay = (event.values[1] / 9.8f).coerceIn(-1f, 1f)
-                    sensorTiltX = sensorTiltX * 0.85f - ax * 0.15f
-                    sensorTiltY = sensorTiltY * 0.85f + ay * 0.15f
-                }
-            }
-
-            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
-        }
-
-        sensorManager?.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_GAME)
-
-        onDispose {
-            sensorManager?.unregisterListener(listener)
-        }
-    }
-
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -194,16 +140,10 @@ fun InteractiveRefocusViewer(
             val idx1 = kotlin.math.min(totalPlanes - 1, idx0 + 1)
             val planeFrac = exactPlane - idx0
 
-            // Compute 3D Parallax differential shifts
-            val totalParallaxX = (sensorTiltX * 24f + touchParallaxX).coerceIn(-36f, 36f)
-            val totalParallaxY = (sensorTiltY * 24f + touchParallaxY).coerceIn(-36f, 36f)
-            val scaleBoost = if (is3DParallaxActive) 1.06f else 1.0f
-
             // Photo Rendering Container with Touch Gestures
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .scale(scaleBoost)
                     .pointerInput(Unit) {
                         detectTapGestures { offset ->
                             tapLocation = offset
@@ -226,60 +166,27 @@ fun InteractiveRefocusViewer(
                                 )
                             }
                         }
-                    }
-                    .pointerInput(is3DParallaxActive) {
-                        if (is3DParallaxActive) {
-                            detectDragGestures(
-                                onDragEnd = {
-                                    touchParallaxX = 0f
-                                    touchParallaxY = 0f
-                                }
-                            ) { change, dragAmount ->
-                                change.consume()
-                                touchParallaxX = (touchParallaxX + dragAmount.x / 4f).coerceIn(-30f, 30f)
-                                touchParallaxY = (touchParallaxY + dragAmount.y / 4f).coerceIn(-30f, 30f)
-                            }
-                        }
                     },
                 contentAlignment = Alignment.Center
             ) {
                 // Render focus plane layers
-                if (is3DParallaxActive) {
-                    planeBitmaps.forEachIndexed { i, bmp ->
-                        if (bmp != null) {
-                            val depthRatio = if (totalPlanes > 1) (i.toFloat() / (totalPlanes - 1)) - 0.5f else 0f
-                            val shiftX = (totalParallaxX * depthRatio * 2.2f).roundToInt()
-                            val shiftY = (totalParallaxY * depthRatio * 2.2f).roundToInt()
-                            val alpha = if (i == idx0) 1.0f else (0.45f / totalPlanes).coerceIn(0.12f, 0.45f)
-                            androidx.compose.foundation.Image(
-                                bitmap = bmp.asImageBitmap(),
-                                contentDescription = "Focus Plane $i",
-                                alpha = alpha,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .offset { IntOffset(shiftX, shiftY) }
-                            )
-                        }
-                    }
-                } else {
-                    val bmp0 = planeBitmaps.getOrNull(idx0)
-                    val bmp1 = planeBitmaps.getOrNull(idx1)
-                    if (bmp0 != null) {
-                        androidx.compose.foundation.Image(
-                            bitmap = bmp0.asImageBitmap(),
-                            contentDescription = "Focus Plane $idx0",
-                            alpha = 1f - planeFrac,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                    if (bmp1 != null && idx1 != idx0 && planeFrac > 0.01f) {
-                        androidx.compose.foundation.Image(
-                            bitmap = bmp1.asImageBitmap(),
-                            contentDescription = "Focus Plane $idx1",
-                            alpha = planeFrac,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
+                val bmp0 = planeBitmaps.getOrNull(idx0)
+                val bmp1 = planeBitmaps.getOrNull(idx1)
+                if (bmp0 != null) {
+                    androidx.compose.foundation.Image(
+                        bitmap = bmp0.asImageBitmap(),
+                        contentDescription = "Focus Plane $idx0",
+                        alpha = 1f - planeFrac,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+                if (bmp1 != null && idx1 != idx0 && planeFrac > 0.01f) {
+                    androidx.compose.foundation.Image(
+                        bitmap = bmp1.asImageBitmap(),
+                        contentDescription = "Focus Plane $idx1",
+                        alpha = planeFrac,
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
 
                 // Tap-to-Refocus Animated Ring Reticle
@@ -334,42 +241,12 @@ fun InteractiveRefocusViewer(
                         modifier = Modifier.size(16.dp)
                     )
                     Text(
-                        text = if (is3DParallaxActive) "3D PARALLAX DEPTH" else "INTERACTIVE REFOCUS",
+                        text = "INTERACTIVE REFOCUS",
                         color = Color.White,
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.5.sp
                     )
-
-                    Spacer(modifier = Modifier.width(4.dp))
-
-                    // 3D Toggle Pill
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (is3DParallaxActive) Color(0xFFFFD54F) else Color(0x33FFFFFF),
-                        modifier = Modifier
-                            .clickable { is3DParallaxActive = !is3DParallaxActive }
-                            .testTag("refocus_3d_toggle")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ViewInAr,
-                                contentDescription = "3D Parallax",
-                                tint = if (is3DParallaxActive) Color.Black else Color.White,
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Text(
-                                text = "3D Mode",
-                                color = if (is3DParallaxActive) Color.Black else Color.White,
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
                 }
 
                 // Slider Card for Smooth Focus Plane Selection

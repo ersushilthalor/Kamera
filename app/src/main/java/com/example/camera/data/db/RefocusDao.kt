@@ -14,6 +14,9 @@ interface RefocusDao {
     @Query("SELECT * FROM refocus_photos ORDER BY timestamp DESC")
     fun getAllRefocusPhotos(): Flow<List<RefocusPhotoEntity>>
 
+    @Query("SELECT * FROM refocus_photos ORDER BY timestamp DESC")
+    suspend fun getAllRefocusPhotosList(): List<RefocusPhotoEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRefocusPhoto(entity: RefocusPhotoEntity)
 

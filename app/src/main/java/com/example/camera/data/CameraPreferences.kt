@@ -551,6 +551,479 @@ class CameraPreferences(context: Context) {
         get() = prefs.getBoolean("pref_auto_framing_enabled", true)
         set(value) = prefs.edit().putBoolean("pref_auto_framing_enabled", value).apply()
 
+    var windNoiseReduction: Boolean
+        get() = prefs.getBoolean("pref_wind_noise_reduction", true)
+        set(value) = prefs.edit().putBoolean("pref_wind_noise_reduction", value).apply()
+
+    var thermalProtection: Boolean
+        get() = prefs.getBoolean("pref_thermal_protection", true)
+        set(value) = prefs.edit().putBoolean("pref_thermal_protection", value).apply()
+
+    var viewfinderFps: Int
+        get() = prefs.getInt("pref_viewfinder_fps", 60)
+        set(value) = prefs.edit().putInt("pref_viewfinder_fps", value).apply()
+
+    var currentZoom: Float
+        get() = prefs.getFloat("pref_current_zoom", 1.0f)
+        set(value) = prefs.edit().putFloat("pref_current_zoom", value).apply()
+
+    var exposureCompensation: Int
+        get() = prefs.getInt("pref_exposure_compensation", 0)
+        set(value) = prefs.edit().putInt("pref_exposure_compensation", value).apply()
+
+    var manualIso: Int?
+        get() {
+            val iso = prefs.getInt("pref_manual_iso", -1)
+            return if (iso > 0) iso else null
+        }
+        set(value) = prefs.edit().putInt("pref_manual_iso", value ?: -1).apply()
+
+    var manualShutterSpeedNs: Long?
+        get() {
+            val ns = prefs.getLong("pref_manual_shutter_speed_ns", -1L)
+            return if (ns > 0) ns else null
+        }
+        set(value) = prefs.edit().putLong("pref_manual_shutter_speed_ns", value ?: -1L).apply()
+
+    var manualFocusDistance: Float
+        get() = prefs.getFloat("pref_manual_focus_distance", 0f)
+        set(value) = prefs.edit().putFloat("pref_manual_focus_distance", value).apply()
+
+    var selectedPhotoFilter: PhotoFilter
+        get() {
+            val name = prefs.getString("pref_selected_photo_filter", PhotoFilter.ORIGINAL.name)
+                ?: PhotoFilter.ORIGINAL.name
+            return try { PhotoFilter.valueOf(name) } catch (e: Exception) { PhotoFilter.ORIGINAL }
+        }
+        set(value) = prefs.edit().putString("pref_selected_photo_filter", value.name).apply()
+
+    // Last selected lens across sessions
+    var lastSelectedLensId: String
+        get() = prefs.getString("pref_last_selected_lens_id", "") ?: ""
+        set(value) = prefs.edit().putString("pref_last_selected_lens_id", value).apply()
+
+    var lastSelectedLensCameraId: String
+        get() = prefs.getString("pref_last_selected_lens_camera_id", "") ?: ""
+        set(value) = prefs.edit().putString("pref_last_selected_lens_camera_id", value).apply()
+
+    var lastSelectedLensFacing: Int
+        get() = prefs.getInt("pref_last_selected_lens_facing", android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK)
+        set(value) = prefs.edit().putInt("pref_last_selected_lens_facing", value).apply()
+
+    var lastSelectedLensType: String
+        get() = prefs.getString("pref_last_selected_lens_type", LensType.WIDE.name) ?: LensType.WIDE.name
+        set(value) = prefs.edit().putString("pref_last_selected_lens_type", value).apply()
+
+    var lastSelectedLensIsPreset: Boolean
+        get() = prefs.getBoolean("pref_last_selected_lens_is_preset", false)
+        set(value) = prefs.edit().putBoolean("pref_last_selected_lens_is_preset", value).apply()
+
+    var lastSelectedLensBaseZoom: Float
+        get() = prefs.getFloat("pref_last_selected_lens_base_zoom", 1.0f)
+        set(value) = prefs.edit().putFloat("pref_last_selected_lens_base_zoom", value).apply()
+
+    fun saveLastLens(lens: LensInfo) {
+        lastSelectedLensId = lens.id
+        lastSelectedLensCameraId = lens.cameraId
+        lastSelectedLensFacing = lens.facing
+        lastSelectedLensType = lens.lensType.name
+        lastSelectedLensIsPreset = lens.isZoomPreset
+        lastSelectedLensBaseZoom = lens.baseZoomRatio
+        lastFacing = lens.facing
+    }
+
+    fun getLastLens(availableLenses: List<LensInfo>): LensInfo? {
+        val targetId = lastSelectedLensId
+        val targetCameraId = lastSelectedLensCameraId
+        val targetFacing = lastSelectedLensFacing
+        val targetType = lastSelectedLensType
+        val targetIsPreset = lastSelectedLensIsPreset
+
+        return availableLenses.firstOrNull { it.id == targetId }
+            ?: availableLenses.firstOrNull {
+                it.cameraId == targetCameraId &&
+                it.facing == targetFacing &&
+                it.lensType.name == targetType &&
+                it.isZoomPreset == targetIsPreset
+            }
+            ?: availableLenses.firstOrNull {
+                it.cameraId == targetCameraId && it.facing == targetFacing
+            }
+            ?: availableLenses.firstOrNull {
+                it.facing == targetFacing && it.lensType.name == targetType && !it.isZoomPreset
+            }
+            ?: availableLenses.firstOrNull { it.facing == targetFacing }
+    }
+
+    // Mode-Specific Settings Helpers
+    private fun modeKey(mode: CameraMode, key: String) = "mode_${mode.name}_$key"
+
+    fun setModeLens(mode: CameraMode, lens: LensInfo) {
+        saveLastLens(lens)
+        prefs.edit()
+            .putString(modeKey(mode, "lens_id"), lens.id)
+            .putString(modeKey(mode, "lens_camera_id"), lens.cameraId)
+            .putInt(modeKey(mode, "lens_facing"), lens.facing)
+            .putString(modeKey(mode, "lens_type"), lens.lensType.name)
+            .putBoolean(modeKey(mode, "lens_is_preset"), lens.isZoomPreset)
+            .putFloat(modeKey(mode, "lens_base_zoom"), lens.baseZoomRatio)
+            .apply()
+    }
+
+    fun getModeLens(mode: CameraMode, availableLenses: List<LensInfo>): LensInfo? {
+        val modeId = prefs.getString(modeKey(mode, "lens_id"), "") ?: ""
+        val modeCamId = prefs.getString(modeKey(mode, "lens_camera_id"), "") ?: ""
+        val modeFacing = prefs.getInt(modeKey(mode, "lens_facing"), -1)
+        val modeType = prefs.getString(modeKey(mode, "lens_type"), "") ?: ""
+        val modeIsPreset = prefs.getBoolean(modeKey(mode, "lens_is_preset"), false)
+
+        if (modeId.isNotEmpty()) {
+            val found = availableLenses.firstOrNull { it.id == modeId }
+            if (found != null) return found
+        }
+        if (modeCamId.isNotEmpty() && modeFacing != -1) {
+            val found = availableLenses.firstOrNull {
+                it.cameraId == modeCamId && it.facing == modeFacing && it.lensType.name == modeType && it.isZoomPreset == modeIsPreset
+            } ?: availableLenses.firstOrNull {
+                it.cameraId == modeCamId && it.facing == modeFacing
+            }
+            if (found != null) return found
+        }
+        return getLastLens(availableLenses)
+    }
+
+    fun setModeZoom(mode: CameraMode, zoom: Float) {
+        currentZoom = zoom
+        prefs.edit().putFloat(modeKey(mode, "zoom"), zoom).apply()
+    }
+
+    fun getModeZoom(mode: CameraMode): Float {
+        val modeZ = prefs.getFloat(modeKey(mode, "zoom"), -1f)
+        return if (modeZ > 0f) modeZ else currentZoom
+    }
+
+    fun setModeFlashMode(mode: CameraMode, flash: FlashMode) {
+        flashMode = flash
+        prefs.edit().putString(modeKey(mode, "flash"), flash.name).apply()
+    }
+
+    fun getModeFlashMode(mode: CameraMode): FlashMode {
+        val name = prefs.getString(modeKey(mode, "flash"), null) ?: return flashMode
+        return try { FlashMode.valueOf(name) } catch (e: Exception) { flashMode }
+    }
+
+    fun setModeTimerMode(mode: CameraMode, timer: TimerMode) {
+        timerMode = timer
+        prefs.edit().putString(modeKey(mode, "timer"), timer.name).apply()
+    }
+
+    fun getModeTimerMode(mode: CameraMode): TimerMode {
+        val name = prefs.getString(modeKey(mode, "timer"), null) ?: return timerMode
+        return try { TimerMode.valueOf(name) } catch (e: Exception) { timerMode }
+    }
+
+    fun setModeGridType(mode: CameraMode, grid: GridType) {
+        gridType = grid
+        prefs.edit().putString(modeKey(mode, "grid"), grid.name).apply()
+    }
+
+    fun getModeGridType(mode: CameraMode): GridType {
+        val name = prefs.getString(modeKey(mode, "grid"), null) ?: return gridType
+        return try { GridType.valueOf(name) } catch (e: Exception) { gridType }
+    }
+
+    fun setModeRaw(mode: CameraMode, enabled: Boolean) {
+        isRawEnabled = enabled
+        prefs.edit().putBoolean(modeKey(mode, "raw"), enabled).apply()
+    }
+
+    fun getModeRaw(mode: CameraMode): Boolean {
+        return if (prefs.contains(modeKey(mode, "raw"))) prefs.getBoolean(modeKey(mode, "raw"), false) else isRawEnabled
+    }
+
+    fun setModePhotoMegapixelMode(mode: CameraMode, mpMode: PhotoMegapixelMode) {
+        photoMegapixelMode = mpMode
+        prefs.edit().putString(modeKey(mode, "photo_mp"), mpMode.name).apply()
+    }
+
+    fun getModePhotoMegapixelMode(mode: CameraMode): PhotoMegapixelMode {
+        val name = prefs.getString(modeKey(mode, "photo_mp"), null) ?: return photoMegapixelMode
+        return try { PhotoMegapixelMode.valueOf(name) } catch (e: Exception) { photoMegapixelMode }
+    }
+
+    fun setModeRefocusEnabled(mode: CameraMode, enabled: Boolean) {
+        isRefocusPhotoEnabled = enabled
+        prefs.edit().putBoolean(modeKey(mode, "refocus_enabled"), enabled).apply()
+    }
+
+    fun getModeRefocusEnabled(mode: CameraMode): Boolean {
+        return if (prefs.contains(modeKey(mode, "refocus_enabled"))) {
+            prefs.getBoolean(modeKey(mode, "refocus_enabled"), false)
+        } else isRefocusPhotoEnabled
+    }
+
+    fun setModeRefocusFrameCount(mode: CameraMode, count: Int) {
+        refocusFrameCount = count
+        prefs.edit().putInt(modeKey(mode, "refocus_count"), count).apply()
+    }
+
+    fun getModeRefocusFrameCount(mode: CameraMode): Int {
+        return prefs.getInt(modeKey(mode, "refocus_count"), refocusFrameCount)
+    }
+
+    fun setModeHqZoomEnabled(mode: CameraMode, enabled: Boolean) {
+        isHighQualityZoomEnabled = enabled
+        prefs.edit().putBoolean(modeKey(mode, "hq_zoom"), enabled).apply()
+    }
+
+    fun getModeHqZoomEnabled(mode: CameraMode): Boolean {
+        return if (prefs.contains(modeKey(mode, "hq_zoom"))) {
+            prefs.getBoolean(modeKey(mode, "hq_zoom"), true)
+        } else isHighQualityZoomEnabled
+    }
+
+    fun setModeZoomQuality(mode: CameraMode, quality: com.example.camera.zoom.ZoomProcessingQuality) {
+        zoomProcessingQuality = quality
+        prefs.edit().putString(modeKey(mode, "zoom_quality"), quality.name).apply()
+    }
+
+    fun getModeZoomQuality(mode: CameraMode): com.example.camera.zoom.ZoomProcessingQuality {
+        val name = prefs.getString(modeKey(mode, "zoom_quality"), null) ?: return zoomProcessingQuality
+        return try { com.example.camera.zoom.ZoomProcessingQuality.valueOf(name) } catch (e: Exception) { zoomProcessingQuality }
+    }
+
+    fun setModeFocusMode(mode: CameraMode, focus: FocusMode) {
+        focusMode = focus
+        prefs.edit().putString(modeKey(mode, "focus_mode"), focus.name).apply()
+    }
+
+    fun getModeFocusMode(mode: CameraMode): FocusMode {
+        val name = prefs.getString(modeKey(mode, "focus_mode"), null) ?: return focusMode
+        return try { FocusMode.valueOf(name) } catch (e: Exception) { focusMode }
+    }
+
+    fun setModeWhiteBalance(mode: CameraMode, wb: WhiteBalanceMode) {
+        whiteBalance = wb
+        prefs.edit().putString(modeKey(mode, "wb"), wb.name).apply()
+    }
+
+    fun getModeWhiteBalance(mode: CameraMode): WhiteBalanceMode {
+        val name = prefs.getString(modeKey(mode, "wb"), null) ?: return whiteBalance
+        return try { WhiteBalanceMode.valueOf(name) } catch (e: Exception) { whiteBalance }
+    }
+
+    fun setModeColorProfile(mode: CameraMode, profile: ColorProfile) {
+        colorProfile = profile
+        prefs.edit().putString(modeKey(mode, "color_profile"), profile.name).apply()
+    }
+
+    fun getModeColorProfile(mode: CameraMode): ColorProfile {
+        val name = prefs.getString(modeKey(mode, "color_profile"), null) ?: return colorProfile
+        return try { ColorProfile.valueOf(name) } catch (e: Exception) { colorProfile }
+    }
+
+    fun setModeEv(mode: CameraMode, ev: Int) {
+        exposureCompensation = ev
+        prefs.edit().putInt(modeKey(mode, "ev"), ev).apply()
+    }
+
+    fun getModeEv(mode: CameraMode): Int {
+        return prefs.getInt(modeKey(mode, "ev"), exposureCompensation)
+    }
+
+    fun setModeIso(mode: CameraMode, iso: Int?) {
+        manualIso = iso
+        prefs.edit().putInt(modeKey(mode, "iso"), iso ?: -1).apply()
+    }
+
+    fun getModeIso(mode: CameraMode): Int? {
+        val iso = prefs.getInt(modeKey(mode, "iso"), -1)
+        return if (iso > 0) iso else manualIso
+    }
+
+    fun setModeShutter(mode: CameraMode, ns: Long?) {
+        manualShutterSpeedNs = ns
+        prefs.edit().putLong(modeKey(mode, "shutter"), ns ?: -1L).apply()
+    }
+
+    fun getModeShutter(mode: CameraMode): Long? {
+        val ns = prefs.getLong(modeKey(mode, "shutter"), -1L)
+        return if (ns > 0) ns else manualShutterSpeedNs
+    }
+
+    fun setModeFocusDistance(mode: CameraMode, distance: Float) {
+        manualFocusDistance = distance
+        prefs.edit().putFloat(modeKey(mode, "focus_dist"), distance).apply()
+    }
+
+    fun getModeFocusDistance(mode: CameraMode): Float {
+        return prefs.getFloat(modeKey(mode, "focus_dist"), manualFocusDistance)
+    }
+
+    fun setModeVideoStabilization(mode: CameraMode, enabled: Boolean) {
+        isVideoStabilizationEnabled = enabled
+        prefs.edit().putBoolean(modeKey(mode, "video_stab"), enabled).apply()
+    }
+
+    fun getModeVideoStabilization(mode: CameraMode): Boolean {
+        return if (prefs.contains(modeKey(mode, "video_stab"))) {
+            prefs.getBoolean(modeKey(mode, "video_stab"), true)
+        } else isVideoStabilizationEnabled
+    }
+
+    fun setModeVideoFps(mode: CameraMode, fps: Int) {
+        videoFps = fps
+        prefs.edit().putInt(modeKey(mode, "video_fps"), fps).apply()
+    }
+
+    fun getModeVideoFps(mode: CameraMode): Int {
+        return prefs.getInt(modeKey(mode, "video_fps"), videoFps)
+    }
+
+    fun setModeVideoBitrate(mode: CameraMode, bitrate: VideoBitrateOption) {
+        videoBitrate = bitrate
+        prefs.edit().putString(modeKey(mode, "video_bitrate"), bitrate.name).apply()
+    }
+
+    fun getModeVideoBitrate(mode: CameraMode): VideoBitrateOption {
+        val name = prefs.getString(modeKey(mode, "video_bitrate"), null) ?: return videoBitrate
+        return try { VideoBitrateOption.valueOf(name) } catch (e: Exception) { videoBitrate }
+    }
+
+    fun setModeVideoResolution(mode: CameraMode, width: Int, height: Int) {
+        videoWidth = width
+        videoHeight = height
+        prefs.edit()
+            .putInt(modeKey(mode, "video_w"), width)
+            .putInt(modeKey(mode, "video_h"), height)
+            .apply()
+    }
+
+    fun getModeVideoWidth(mode: CameraMode): Int {
+        return prefs.getInt(modeKey(mode, "video_w"), videoWidth)
+    }
+
+    fun getModeVideoHeight(mode: CameraMode): Int {
+        return prefs.getInt(modeKey(mode, "video_h"), videoHeight)
+    }
+
+    fun setModeAudioEnabled(mode: CameraMode, enabled: Boolean) {
+        isAudioEnabled = enabled
+        prefs.edit().putBoolean(modeKey(mode, "audio_enabled"), enabled).apply()
+    }
+
+    fun getModeAudioEnabled(mode: CameraMode): Boolean {
+        return if (prefs.contains(modeKey(mode, "audio_enabled"))) {
+            prefs.getBoolean(modeKey(mode, "audio_enabled"), true)
+        } else isAudioEnabled
+    }
+
+    fun setModeAutoHdr(mode: CameraMode, enabled: Boolean) {
+        autoHdrEnabled = enabled
+        prefs.edit().putBoolean(modeKey(mode, "auto_hdr"), enabled).apply()
+    }
+
+    fun getModeAutoHdr(mode: CameraMode): Boolean {
+        return if (prefs.contains(modeKey(mode, "auto_hdr"))) {
+            prefs.getBoolean(modeKey(mode, "auto_hdr"), true)
+        } else autoHdrEnabled
+    }
+
+    fun setModeAutoFraming(mode: CameraMode, enabled: Boolean) {
+        autoFramingEnabled = enabled
+        prefs.edit().putBoolean(modeKey(mode, "auto_framing"), enabled).apply()
+    }
+
+    fun getModeAutoFraming(mode: CameraMode): Boolean {
+        return if (prefs.contains(modeKey(mode, "auto_framing"))) {
+            prefs.getBoolean(modeKey(mode, "auto_framing"), true)
+        } else autoFramingEnabled
+    }
+
+    fun setModePhotoFilter(mode: CameraMode, filter: PhotoFilter) {
+        selectedPhotoFilter = filter
+        prefs.edit().putString(modeKey(mode, "filter"), filter.name).apply()
+    }
+
+    fun getModePhotoFilter(mode: CameraMode): PhotoFilter {
+        val name = prefs.getString(modeKey(mode, "filter"), null) ?: return selectedPhotoFilter
+        return try { PhotoFilter.valueOf(name) } catch (e: Exception) { selectedPhotoFilter }
+    }
+
+    fun setModePortraitConfig(mode: CameraMode, config: PortraitConfig) {
+        portraitBlurStrength = config.blurStrength
+        portraitAperture = config.simulatedAperture
+        prefs.edit()
+            .putFloat(modeKey(mode, "portrait_blur"), config.blurStrength)
+            .putString(modeKey(mode, "portrait_aperture"), config.simulatedAperture)
+            .apply()
+    }
+
+    fun getModePortraitConfig(mode: CameraMode): PortraitConfig {
+        val blur = prefs.getFloat(modeKey(mode, "portrait_blur"), portraitBlurStrength)
+        val ap = prefs.getString(modeKey(mode, "portrait_aperture"), portraitAperture) ?: portraitAperture
+        return PortraitConfig(blurStrength = blur, simulatedAperture = ap)
+    }
+
+    fun setModeNightConfig(mode: CameraMode, config: NightConfig) {
+        nightConfig = config
+        prefs.edit()
+            .putInt(modeKey(mode, "night_duration"), config.durationSeconds)
+            .putBoolean(modeKey(mode, "night_fusion"), config.multiFrameFusionEnabled)
+            .putBoolean(modeKey(mode, "night_anti_ghost"), config.antiGhostingEnabled)
+            .putFloat(modeKey(mode, "night_noise"), config.noiseSuppression)
+            .putFloat(modeKey(mode, "night_shadow"), config.shadowLift)
+            .apply()
+    }
+
+    fun getModeNightConfig(mode: CameraMode): NightConfig {
+        if (!prefs.contains(modeKey(mode, "night_duration"))) return nightConfig
+        val dur = prefs.getInt(modeKey(mode, "night_duration"), nightDurationSeconds)
+        val fus = prefs.getBoolean(modeKey(mode, "night_fusion"), nightIsMultiFrameFusion)
+        val ag = prefs.getBoolean(modeKey(mode, "night_anti_ghost"), nightIsAntiGhostingEnabled)
+        val ns = prefs.getFloat(modeKey(mode, "night_noise"), nightNoiseSuppression)
+        val sl = prefs.getFloat(modeKey(mode, "night_shadow"), nightShadowLift)
+        return NightConfig(
+            durationSeconds = dur,
+            multiFrameFusionEnabled = fus,
+            antiGhostingEnabled = ag,
+            noiseSuppression = ns,
+            shadowLift = sl
+        )
+    }
+
+    fun setModeCinemaConfig(mode: CameraMode, config: CinemaConfig) {
+        saveCinemaConfig(config)
+    }
+
+    fun getModeCinemaConfig(mode: CameraMode): CinemaConfig {
+        return getCinemaConfig()
+    }
+
+    fun setModeTapFocusConfig(mode: CameraMode, config: TapFocusConfig) {
+        tapFocusConfig = config
+    }
+
+    fun getModeTapFocusConfig(mode: CameraMode): TapFocusConfig {
+        return tapFocusConfig
+    }
+
+    fun setModeHybridStabilizationConfig(mode: CameraMode, config: HybridStabilizationConfig) {
+        hybridStabilizationConfig = config
+    }
+
+    fun getModeHybridStabilizationConfig(mode: CameraMode): HybridStabilizationConfig {
+        return hybridStabilizationConfig
+    }
+
+    fun setModeWindNoiseReduction(mode: CameraMode, enabled: Boolean) {
+        prefs.edit().putBoolean(modeKey(mode, "wind_noise_reduction"), enabled).apply()
+    }
+
+    fun getModeWindNoiseReduction(mode: CameraMode): Boolean {
+        return prefs.getBoolean(modeKey(mode, "wind_noise_reduction"), windNoiseReduction)
+    }
+
     fun resetAllSettingsToDefaults() {
         prefs.edit().clear().apply()
     }

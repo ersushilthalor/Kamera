@@ -91,6 +91,8 @@ class Camera2Engine(private val context: Context) {
         }
     }
 
+    private val preferences by lazy { com.example.camera.data.CameraPreferences(context) }
+
     // State Flows
     private val _availableLenses = MutableStateFlow<List<LensInfo>>(emptyList())
     val availableLenses: StateFlow<List<LensInfo>> = _availableLenses.asStateFlow()
@@ -648,9 +650,11 @@ class Camera2Engine(private val context: Context) {
 
             _availableLenses.value = sortedLenses
 
-            // Maintain current selection or pick 1x Main Wide
+            // Maintain current selection or restore user's saved lens across sessions
             val currentSelected = _selectedLens.value
+            val savedLens = preferences.getLastLens(sortedLenses)
             val validSelection = sortedLenses.firstOrNull { it.id == currentSelected?.id }
+                ?: savedLens
                 ?: sortedLenses.firstOrNull { it.facing == CameraCharacteristics.LENS_FACING_BACK && it.lensType == LensType.WIDE && !it.isZoomPreset }
                 ?: sortedLenses.firstOrNull { it.facing == CameraCharacteristics.LENS_FACING_BACK }
                 ?: sortedLenses.firstOrNull()
@@ -658,6 +662,14 @@ class Camera2Engine(private val context: Context) {
             _selectedLens.value = validSelection
             if (validSelection != null) {
                 inspectCapabilities(validSelection.cameraId)
+                val savedZoom = preferences.currentZoom
+                if (savedZoom > 0f) {
+                    currentZoom = savedZoom
+                    _currentZoom.value = savedZoom
+                } else {
+                    currentZoom = validSelection.baseZoomRatio
+                    _currentZoom.value = validSelection.baseZoomRatio
+                }
             }
 
             Log.i(TAG, "Total discovered lenses after deep scan: ${sortedLenses.size}")
@@ -867,6 +879,8 @@ class Camera2Engine(private val context: Context) {
         _selectedLens.value = lens
         currentZoom = lens.baseZoomRatio
         _currentZoom.value = lens.baseZoomRatio
+        preferences.saveLastLens(lens)
+        preferences.currentZoom = lens.baseZoomRatio
 
         // If recording video, prioritize continuity to ensure zero distortion and no video stop:
         // Adjust optical zoom ratio and crop dynamically on the active recording stream
@@ -1815,6 +1829,7 @@ class Camera2Engine(private val context: Context) {
         val clampedZoom = zoom.coerceIn(0.5f, 10.0f)
         currentZoom = clampedZoom
         _currentZoom.value = clampedZoom
+        preferences.currentZoom = clampedZoom
 
         val currentLens = _selectedLens.value ?: return
 
@@ -2407,23 +2422,17 @@ class Camera2Engine(private val context: Context) {
         val lens = _selectedLens.value
         val chars = if (lens != null) getCharacteristics(lens.cameraId) else null
         val minFocusDist = chars?.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
-
-        // If camera lens is fixed-focus (minFocusDist <= 0.05f), it cannot physically shift focus planes,
-        // so fallback to standard single photo capture safely.
-        if (minFocusDist <= 0.05f) {
-            takePhoto(onComplete)
-            return
-        }
+        val effectiveMinDist = if (minFocusDist > 0.05f) minFocusDist else 5.0f
 
         val lastFocusDiopters = lastCaptureResult?.get(CaptureResult.LENS_FOCUS_DISTANCE)
-            ?: (minFocusDist * 0.35f)
+            ?: (effectiveMinDist * 0.35f)
 
         val frameCount = refocusFrameCount.coerceIn(5, 20)
         val focusPlanes = FloatArray(frameCount)
         for (i in 0 until frameCount) {
             val fraction = i.toFloat() / (frameCount - 1).coerceAtLeast(1)
             // Sweep from maximum focus (closest near) down to 0.0 (infinity/far)
-            focusPlanes[i] = (minFocusDist * (1.0f - fraction)).coerceIn(0f, minFocusDist)
+            focusPlanes[i] = (effectiveMinDist * (1.0f - fraction)).coerceIn(0f, effectiveMinDist)
         }
 
         // Identify the frame closest to current user AF distance for instant saving as default gallery photo
@@ -2441,9 +2450,41 @@ class Camera2Engine(private val context: Context) {
             File(context.cacheDir, "refocus_tmp_${idx}_${System.currentTimeMillis()}.jpg")
         }
 
-        var savedNormalUri: Uri? = null
         var framesReceived = 0
         val isCompleted = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        fun finalizeRefocusCapture() {
+            if (!isCompleted.compareAndSet(false, true)) return
+            readerJpeg.setOnImageAvailableListener(null, null)
+            engineScope.launch(Dispatchers.IO) {
+                var finalUri: Uri? = null
+                try {
+                    val validFiles = tempPlaneFiles.filter { it.exists() && it.length() > 0 }
+                    if (validFiles.isNotEmpty()) {
+                        val midFile = tempPlaneFiles.getOrNull(bestMidIndex)?.takeIf { it.exists() && it.length() > 0 }
+                            ?: validFiles.first()
+                        val midBytes = midFile.readBytes()
+                        finalUri = saveJpegBytesToMediaStore(midBytes)
+                        if (finalUri != null) {
+                            refocusEngine.processAndPersistPlanes(
+                                photoUri = finalUri,
+                                tempPlaneFiles = tempPlaneFiles,
+                                planeDiopters = focusPlanes.toList()
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error finalizing refocus package", e)
+                } finally {
+                    tempPlaneFiles.forEach { runCatching { it.delete() } }
+                    _isCapturing.value = false
+                    updateStorageStats()
+                    withContext(Dispatchers.Main) {
+                        onComplete(finalUri)
+                    }
+                }
+            }
+        }
 
         readerJpeg.setOnImageAvailableListener({ reader ->
             val image = reader.acquireNextImage() ?: return@setOnImageAvailableListener
@@ -2460,38 +2501,8 @@ class Camera2Engine(private val context: Context) {
                     Log.w(TAG, "Failed writing refocus frame $frameIndex", e)
                 }
 
-                if (frameIndex == bestMidIndex) {
-                    engineScope.launch(Dispatchers.IO) {
-                        try {
-                            val uri = saveJpegBytesToMediaStore(bytes)
-                            savedNormalUri = uri
-                            _isCapturing.value = false
-                            updateStorageStats()
-                            if (isCompleted.compareAndSet(false, true)) {
-                                withContext(Dispatchers.Main) {
-                                    onComplete(uri)
-                                }
-                            }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error saving primary refocus plane JPEG", e)
-                        }
-                    }
-                }
-
                 if (frameIndex >= frameCount - 1) {
-                    readerJpeg.setOnImageAvailableListener(null, null)
-                    engineScope.launch(Dispatchers.Default) {
-                        val uri = savedNormalUri
-                        if (uri != null) {
-                            refocusEngine.processAndPersistPlanes(
-                                photoUri = uri,
-                                tempPlaneFiles = tempPlaneFiles,
-                                planeDiopters = focusPlanes.toList()
-                            )
-                        } else {
-                            tempPlaneFiles.forEach { it.delete() }
-                        }
-                    }
+                    finalizeRefocusCapture()
                 }
             }
         }, backgroundHandler)
@@ -2530,26 +2541,11 @@ class Camera2Engine(private val context: Context) {
             // Watchdog fallback: in case burst fails or frame is missed, ensure normal photo is saved
             engineScope.launch {
                 delay(6000)
-                if (isCompleted.compareAndSet(false, true)) {
-                    Log.w(TAG, "Refocus watchdog triggered fallback")
-                    readerJpeg.setOnImageAvailableListener(null, null)
-                    _isCapturing.value = false
-                    var fallbackUri: Uri? = null
-                    val candidate = tempPlaneFiles.firstOrNull { it.exists() && it.length() > 0 }
-                    if (candidate != null) {
-                        try {
-                            fallbackUri = saveJpegBytesToMediaStore(candidate.readBytes())
-                        } catch (e: Exception) { Log.e(TAG, "Fallback save error", e) }
-                    }
-                    tempPlaneFiles.forEach { it.delete() }
-                    withContext(Dispatchers.Main) {
-                        onComplete(fallbackUri)
-                    }
-                }
+                finalizeRefocusCapture()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed submitting refocus burst, falling back to standard capture", e)
-            tempPlaneFiles.forEach { it.delete() }
+            tempPlaneFiles.forEach { runCatching { it.delete() } }
             takePhoto(onComplete)
         }
     }

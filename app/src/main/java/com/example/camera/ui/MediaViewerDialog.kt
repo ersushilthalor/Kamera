@@ -50,7 +50,14 @@ fun MediaViewerDialog(
     LaunchedEffect(media.uri) {
         if (!media.isVideo) {
             val repo = RefocusRepository(context)
-            refocusEntity = repo.getRefocusPhoto(media.uri.toString())
+            var entity = repo.getRefocusPhoto(media.uri.toString())
+            var retries = 0
+            while (entity == null && retries < 8) {
+                kotlinx.coroutines.delay(250)
+                entity = repo.getRefocusPhoto(media.uri.toString())
+                retries++
+            }
+            refocusEntity = entity
         }
     }
 
