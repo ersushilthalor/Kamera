@@ -1040,4 +1040,111 @@ class CameraPreferences(context: Context) {
     fun resetAllSettingsToDefaults() {
         prefs.edit().clear().apply()
     }
+
+    // --- Custom Image Processing Pipeline Persistence ---
+
+    var isCustomPipelineEnabled: Boolean
+        get() = prefs.getBoolean("pref_custom_pipeline_enabled", true)
+        set(value) = prefs.edit().putBoolean("pref_custom_pipeline_enabled", value).apply()
+
+    var activePipelinePresetId: String
+        get() = prefs.getString("pref_active_pipeline_preset_id", com.example.camera.pipeline.model.PipelinePreset.HASSELBLAD.id)
+            ?: com.example.camera.pipeline.model.PipelinePreset.HASSELBLAD.id
+        set(value) = prefs.edit().putString("pref_active_pipeline_preset_id", value).apply()
+
+    private val moshi by lazy {
+        com.squareup.moshi.Moshi.Builder()
+            .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+            .build()
+    }
+
+    fun getActivePipelinePreset(): com.example.camera.pipeline.model.PipelinePreset {
+        val presetId = activePipelinePresetId
+        val customPresets = getCustomPresets()
+        val custom = customPresets.firstOrNull { it.id == presetId }
+        if (custom != null) return custom
+        return com.example.camera.pipeline.model.PipelinePreset.BUILT_IN_PRESETS.firstOrNull { it.id == presetId }
+            ?: com.example.camera.pipeline.model.PipelinePreset.HASSELBLAD
+    }
+
+    fun saveActivePipelinePreset(preset: com.example.camera.pipeline.model.PipelinePreset) {
+        activePipelinePresetId = preset.id
+        savePipelineParams(preset.id, preset.params)
+    }
+
+    fun getPipelineParams(presetId: String): com.example.camera.pipeline.model.CustomPipelineParams {
+        val json = prefs.getString("pref_pipeline_params_$presetId", null)
+        if (json != null) {
+            try {
+                val adapter = moshi.adapter(com.example.camera.pipeline.model.CustomPipelineParams::class.java)
+                val params = adapter.fromJson(json)
+                if (params != null) return params
+            } catch (e: Exception) {
+                // fallback
+            }
+        }
+        val defaultPreset = com.example.camera.pipeline.model.PipelinePreset.BUILT_IN_PRESETS.firstOrNull { it.id == presetId }
+            ?: com.example.camera.pipeline.model.PipelinePreset.HASSELBLAD
+        return defaultPreset.params
+    }
+
+    fun savePipelineParams(presetId: String, params: com.example.camera.pipeline.model.CustomPipelineParams) {
+        try {
+            val adapter = moshi.adapter(com.example.camera.pipeline.model.CustomPipelineParams::class.java)
+            val json = adapter.toJson(params)
+            prefs.edit().putString("pref_pipeline_params_$presetId", json).apply()
+        } catch (e: Exception) {
+            // ignore
+        }
+    }
+
+    fun getCustomPresets(): List<com.example.camera.pipeline.model.PipelinePreset> {
+        val json = prefs.getString("pref_custom_pipeline_presets_list", null) ?: return emptyList()
+        return try {
+            val type = com.squareup.moshi.Types.newParameterizedType(
+                List::class.java,
+                com.example.camera.pipeline.model.PipelinePreset::class.java
+            )
+            val adapter = moshi.adapter<List<com.example.camera.pipeline.model.PipelinePreset>>(type)
+            adapter.fromJson(json) ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    fun saveCustomPreset(preset: com.example.camera.pipeline.model.PipelinePreset) {
+        val current = getCustomPresets().toMutableList()
+        val index = current.indexOfFirst { it.id == preset.id }
+        if (index >= 0) {
+            current[index] = preset
+        } else {
+            current.add(preset)
+        }
+        try {
+            val type = com.squareup.moshi.Types.newParameterizedType(
+                List::class.java,
+                com.example.camera.pipeline.model.PipelinePreset::class.java
+            )
+            val adapter = moshi.adapter<List<com.example.camera.pipeline.model.PipelinePreset>>(type)
+            val json = adapter.toJson(current)
+            prefs.edit().putString("pref_custom_pipeline_presets_list", json).apply()
+        } catch (e: Exception) {
+            // ignore
+        }
+    }
+
+    fun deleteCustomPreset(presetId: String) {
+        val current = getCustomPresets().filterNot { it.id == presetId }
+        try {
+            val type = com.squareup.moshi.Types.newParameterizedType(
+                List::class.java,
+                com.example.camera.pipeline.model.PipelinePreset::class.java
+            )
+            val adapter = moshi.adapter<List<com.example.camera.pipeline.model.PipelinePreset>>(type)
+            val json = adapter.toJson(current)
+            prefs.edit().putString("pref_custom_pipeline_presets_list", json).apply()
+        } catch (e: Exception) {
+            // ignore
+        }
+    }
 }

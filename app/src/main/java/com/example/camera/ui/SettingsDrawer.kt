@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -154,6 +155,13 @@ fun SettingsDrawer(
     onPortraitConfigChange: (PortraitConfig) -> Unit = {},
     onPhotoFilterSelected: (PhotoFilter) -> Unit = {},
     onResetAllSettings: () -> Unit = {},
+    // Custom Image Processing Pipeline
+    isCustomPipelineEnabled: Boolean = true,
+    activePipelinePreset: com.example.camera.pipeline.model.PipelinePreset = com.example.camera.pipeline.model.PipelinePreset.HASSELBLAD,
+    onCustomPipelineToggle: (Boolean) -> Unit = {},
+    onSelectPipelinePreset: (com.example.camera.pipeline.model.PipelinePreset) -> Unit = {},
+    onOpenPipelineStudio: () -> Unit = {},
+    onOpenBeforeAfter: () -> Unit = {},
     // UI Customization callbacks
     uiCustomizationState: UiCustomizationState = UiCustomizationState(),
     onSelectTemplate: (UiTemplateType) -> Unit = {},
@@ -456,6 +464,81 @@ fun SettingsDrawer(
                                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                             PhotoFilter.entries.take(4).forEach { filter ->
                                                 LightSelectPill(filter.displayName, selectedPhotoFilter == filter, { onPhotoFilterSelected(filter) }, Modifier.weight(1f))
+                                            }
+                                        }
+                                    }
+                                }
+
+                                item {
+                                    SettingsSectionCard(title = "Custom Image Processing Pipeline (ISP)") {
+                                        LightToggleRow(
+                                            title = "Enable Sensor Pipeline",
+                                            subtitle = "Processes RAW/YUV direct sensor data before JPEG encoding (NOT filters)",
+                                            isChecked = isCustomPipelineEnabled,
+                                            onToggle = { onCustomPipelineToggle(!isCustomPipelineEnabled) }
+                                        )
+                                        if (isCustomPipelineEnabled) {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = "Camera ISP Tuning Preset",
+                                                fontSize = 13.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color(0xFF1F2937)
+                                            )
+                                            Text(
+                                                text = "Subtle hardware-level processing profiles preserving natural realism",
+                                                fontSize = 11.5.sp,
+                                                color = Color(0xFF6B7280)
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                com.example.camera.pipeline.model.PipelinePreset.BUILT_IN_PRESETS.take(4).forEach { p ->
+                                                    LightSelectPill(
+                                                        label = p.displayName,
+                                                        isSelected = activePipelinePreset.id == p.id,
+                                                        onClick = { onSelectPipelinePreset(p) },
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Button(
+                                                    onClick = onOpenPipelineStudio,
+                                                    colors = ButtonDefaults.buttonColors(
+                                                        containerColor = Color(0xFFE5A93B),
+                                                        contentColor = Color.Black
+                                                    ),
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Tune,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text("Fine-tune Studio", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                }
+
+                                                OutlinedButton(
+                                                    onClick = onOpenBeforeAfter,
+                                                    modifier = Modifier.weight(1f),
+                                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF1F2937))
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.AutoMirrored.Filled.CompareArrows,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text("Before / After", fontSize = 12.sp)
+                                                }
                                             }
                                         }
                                     }

@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Lock
@@ -189,6 +191,12 @@ fun CameraScreen(
     val zoomProcessingQuality by viewModel.zoomProcessingQuality.collectAsStateWithLifecycle()
     val isZoomProcessing by viewModel.isZoomProcessing.collectAsStateWithLifecycle()
     val zoomProgress by viewModel.zoomProgress.collectAsStateWithLifecycle()
+
+    val isCustomPipelineEnabled by viewModel.isCustomPipelineEnabled.collectAsStateWithLifecycle()
+    val activePipelinePreset by viewModel.activePipelinePreset.collectAsStateWithLifecycle()
+    val isPipelineSheetOpen by viewModel.isPipelineSheetOpen.collectAsStateWithLifecycle()
+    val isBeforeAfterOpen by viewModel.isBeforeAfterOpen.collectAsStateWithLifecycle()
+    val latestPipelineCapture by viewModel.latestPipelineCapture.collectAsStateWithLifecycle()
 
     var isCustomUiStudioOpen by remember { mutableStateOf(false) }
 
@@ -382,6 +390,73 @@ fun CameraScreen(
             layoutConfig = activeLayoutConfig,
             modifier = Modifier.align(Alignment.TopCenter)
         )
+
+        // 2c. Custom Image Processing Pipeline Quick Access Pill & Before/After Pill
+        if (cameraMode == CameraMode.PHOTO || cameraMode == CameraMode.PORTRAIT) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 54.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isCustomPipelineEnabled) Color(0xDD16181D) else Color(0xAA16181D),
+                    border = BorderStroke(
+                        1.dp,
+                        if (isCustomPipelineEnabled) Color(0xFFE5A93B).copy(alpha = 0.6f) else Color.White.copy(alpha = 0.2f)
+                    ),
+                    modifier = Modifier
+                        .clickable { viewModel.setPipelineSheetOpen(true) }
+                        .testTag("pipeline_viewfinder_pill")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (isCustomPipelineEnabled) "✦ ${activePipelinePreset.displayName}" else "Pipeline Off",
+                            color = if (isCustomPipelineEnabled) Color(0xFFE5A93B) else Color.White.copy(alpha = 0.6f),
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                }
+
+                if (latestPipelineCapture != null) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color(0xDD16181D),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f)),
+                        modifier = Modifier
+                            .clickable { viewModel.setBeforeAfterOpen(true) }
+                            .testTag("pipeline_quick_compare_pill")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.CompareArrows,
+                                contentDescription = "Compare",
+                                tint = Color.White,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Compare",
+                                color = Color.White,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
+        }
 
         // 2b. Floating Frosted Video Settings Panel (Resolution & Frame Rate)
         if (cameraMode == CameraMode.VIDEO) {
@@ -755,6 +830,18 @@ fun CameraScreen(
             onGridTypeSelected = { viewModel.setGridType(it) },
             onCinemaConfigChange = { viewModel.updateCinemaConfig(it) },
             onOpenCustomUiStudio = { isCustomUiStudioOpen = true },
+            isCustomPipelineEnabled = isCustomPipelineEnabled,
+            activePipelinePreset = activePipelinePreset,
+            onCustomPipelineToggle = { viewModel.toggleCustomPipelineEnabled(it) },
+            onSelectPipelinePreset = { viewModel.selectPipelinePreset(it) },
+            onOpenPipelineStudio = {
+                viewModel.setSettingsOpen(false)
+                viewModel.setPipelineSheetOpen(true)
+            },
+            onOpenBeforeAfter = {
+                viewModel.setSettingsOpen(false)
+                viewModel.setBeforeAfterOpen(true)
+            },
             onDismiss = {
                 viewModel.setSettingsOpen(false)
                 if (cameraMode == CameraMode.MORE) {
@@ -791,6 +878,22 @@ fun CameraScreen(
                     viewModel.deleteCustomPreset(presetId)
                     viewModel.showToast("Preset deleted")
                 }
+            )
+        }
+
+        // 9. Custom Image Processing Pipeline Bottom Sheet
+        if (isPipelineSheetOpen) {
+            com.example.camera.pipeline.ui.CustomPipelineBottomSheet(
+                viewModel = viewModel,
+                onDismissRequest = { viewModel.setPipelineSheetOpen(false) }
+            )
+        }
+
+        // 10. Pipeline Split Before / After Comparison Dialog
+        if (isBeforeAfterOpen) {
+            com.example.camera.pipeline.ui.PipelineBeforeAfterDialog(
+                viewModel = viewModel,
+                onDismissRequest = { viewModel.setBeforeAfterOpen(false) }
             )
         }
     }

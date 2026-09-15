@@ -251,6 +251,108 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         preferences.saveCinemaConfig(config)
     }
 
+    // --- Custom Image Processing Pipeline (RAW/YUV Uncompressed Processing) ---
+    private val _isCustomPipelineEnabled = MutableStateFlow(preferences.isCustomPipelineEnabled)
+    val isCustomPipelineEnabled: StateFlow<Boolean> = _isCustomPipelineEnabled.asStateFlow()
+
+    private val _activePipelinePreset = MutableStateFlow(preferences.getActivePipelinePreset())
+    val activePipelinePreset: StateFlow<com.example.camera.pipeline.model.PipelinePreset> = _activePipelinePreset.asStateFlow()
+
+    private val _activePipelineParams = MutableStateFlow(preferences.getPipelineParams(preferences.activePipelinePresetId))
+    val activePipelineParams: StateFlow<com.example.camera.pipeline.model.CustomPipelineParams> = _activePipelineParams.asStateFlow()
+
+    private val _customPresets = MutableStateFlow(preferences.getCustomPresets())
+    val customPresets: StateFlow<List<com.example.camera.pipeline.model.PipelinePreset>> = _customPresets.asStateFlow()
+
+    private val _isPipelineSheetOpen = MutableStateFlow(false)
+    val isPipelineSheetOpen: StateFlow<Boolean> = _isPipelineSheetOpen.asStateFlow()
+
+    private val _isBeforeAfterOpen = MutableStateFlow(false)
+    val isBeforeAfterOpen: StateFlow<Boolean> = _isBeforeAfterOpen.asStateFlow()
+
+    val latestPipelineCapture = com.example.camera.pipeline.engine.PipelineCaptureCache.latestCapture
+
+    private val _isReprocessing = MutableStateFlow(false)
+    val isReprocessing: StateFlow<Boolean> = _isReprocessing.asStateFlow()
+
+    fun setPipelineSheetOpen(isOpen: Boolean) {
+        _isPipelineSheetOpen.value = isOpen
+    }
+
+    fun setBeforeAfterOpen(isOpen: Boolean) {
+        _isBeforeAfterOpen.value = isOpen
+    }
+
+    fun toggleCustomPipelineEnabled(enabled: Boolean) {
+        _isCustomPipelineEnabled.value = enabled
+        preferences.isCustomPipelineEnabled = enabled
+        showToast(if (enabled) "Custom Image Pipeline: ON" else "Custom Image Pipeline: OFF")
+    }
+
+    fun selectPipelinePreset(preset: com.example.camera.pipeline.model.PipelinePreset) {
+        _activePipelinePreset.value = preset
+        preferences.saveActivePipelinePreset(preset)
+        val params = preferences.getPipelineParams(preset.id)
+        _activePipelineParams.value = params
+        showToast("Preset: ${preset.displayName}")
+    }
+
+    fun updatePipelineParams(params: com.example.camera.pipeline.model.CustomPipelineParams) {
+        _activePipelineParams.value = params
+        preferences.savePipelineParams(_activePipelinePreset.value.id, params)
+    }
+
+    fun savePipelineCustomPreset(name: String, description: String) {
+        val id = "custom_" + System.currentTimeMillis()
+        val newPreset = com.example.camera.pipeline.model.PipelinePreset(
+            id = id,
+            name = name,
+            subtitle = "Custom Tuning",
+            description = description,
+            isBuiltIn = false,
+            params = _activePipelineParams.value
+        )
+        preferences.saveCustomPreset(newPreset)
+        _customPresets.value = preferences.getCustomPresets()
+        selectPipelinePreset(newPreset)
+        showToast("Preset saved: $name")
+    }
+
+    fun deletePipelineCustomPreset(presetId: String) {
+        preferences.deleteCustomPreset(presetId)
+        _customPresets.value = preferences.getCustomPresets()
+        if (_activePipelinePreset.value.id == presetId) {
+            selectPipelinePreset(com.example.camera.pipeline.model.PipelinePreset.HASSELBLAD)
+        }
+        showToast("Custom preset deleted")
+    }
+
+    fun resetActivePresetParams() {
+        val preset = _activePipelinePreset.value
+        val defaultParams = com.example.camera.pipeline.model.PipelinePreset.BUILT_IN_PRESETS.firstOrNull { it.id == preset.id }?.params
+            ?: preset.params
+        _activePipelineParams.value = defaultParams
+        preferences.savePipelineParams(preset.id, defaultParams)
+        showToast("Reset ${preset.displayName} parameters")
+    }
+
+    fun reprocessLatestCaptureWithCurrentParams(onComplete: (Uri?) -> Unit = {}) {
+        viewModelScope.launch {
+            _isReprocessing.value = true
+            val uri = engine.reprocessLatestPipelineCapture(
+                params = _activePipelineParams.value,
+                preset = _activePipelinePreset.value
+            )
+            _isReprocessing.value = false
+            if (uri != null) {
+                showToast("Photo re-rendered and saved to gallery!")
+            } else {
+                showToast("Re-rendering failed: No cached capture")
+            }
+            onComplete(uri)
+        }
+    }
+
     // Background Sequential Queue for Portrait Processing
     // Strictly queues portrait captures sequentially to prevent duplicate processing,
     // memory spikes, and crashes during rapid multi-photo captures.
