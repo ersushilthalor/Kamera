@@ -903,11 +903,56 @@ class Camera2Engine(private val context: Context) {
             return
         }
 
-        // Motorola Instant Handover: check if target lens is already warm and running in background
+        val switchStartNs = System.nanoTime()
+
+        // 1. Instant Concurrent Lens Switch (No camera close, no session recreation, no surface recreation)
+        if (motorolaSwitchEngine.isConcurrentSessionReady(lens)) {
+            val bundle = motorolaSwitchEngine.switchConcurrentLens(
+                targetLens = lens,
+                currentDevice = cameraDevice,
+                currentSession = captureSession,
+                currentJpegReader = imageReaderJpeg,
+                currentYuvReader = imageReaderYuv,
+                currentLens = previousLens,
+                switchStartNs = switchStartNs
+            )
+            if (bundle != null) {
+                synchronized(cameraLifecycleLock) {
+                    cameraDevice = bundle.cameraDevice
+                    captureSession = bundle.captureSession
+                    bundle.imageReaderJpeg?.let { imageReaderJpeg = it }
+                    bundle.imageReaderYuv?.let { imageReaderYuv = it }
+                    _isCameraReady.value = true
+                }
+                inspectCapabilities(lens.cameraId)
+                // Attach main captureCallback to the active repeating request so AE/AF metrics continue updating UI
+                try {
+                    val previewSurf = if (lens.lensType == LensType.ULTRAWIDE) {
+                        motorolaSwitchEngine.compositor.ultraWideCameraSurface
+                    } else {
+                        motorolaSwitchEngine.compositor.mainCameraSurface
+                    }
+                    val req = bundle.cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                        if (previewSurf != null && previewSurf.isValid) {
+                            addTarget(previewSurf)
+                        }
+                        applyCommonSettings(this)
+                    }
+                    bundle.captureSession.setRepeatingRequest(req.build(), captureCallback, backgroundHandler)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Non-fatal: could not update repeating request callback on swapped session", e)
+                }
+                val switchDurationMs = (System.nanoTime() - switchStartNs) / 1_000_000L
+                Log.i(TAG, "[LATENCY] Instant switch to ${lens.lensType} completed in ${switchDurationMs}ms (Session swapped, 0 openCamera, 0 createCaptureSession)")
+                return
+            }
+        }
+
+        // 2. Fallback Fast Handover if target camera was warm in background (non-concurrent HAL):
         val warmDevice = motorolaSwitchEngine.handoffBackgroundCamera(lens)
         if (warmDevice != null) {
             inspectCapabilities(lens.cameraId)
-            switchWithWarmCamera(warmDevice, lens)
+            switchWithWarmCamera(warmDevice, lens, switchStartNs)
             return
         }
 
@@ -915,7 +960,7 @@ class Camera2Engine(private val context: Context) {
         restartCamera()
     }
 
-    private fun switchWithWarmCamera(warmDevice: CameraDevice, lens: LensInfo) {
+    private fun switchWithWarmCamera(warmDevice: CameraDevice, lens: LensInfo, switchStartNs: Long = System.nanoTime()) {
         startBackgroundThread()
         backgroundHandler?.post {
             synchronized(cameraLifecycleLock) {
@@ -930,11 +975,23 @@ class Camera2Engine(private val context: Context) {
                 val texture = previewSurfaceTexture ?: return@synchronized
                 val optimalSize = _previewBufferSize.value ?: Size(1920, 1080)
                 texture.setDefaultBufferSize(optimalSize.width, optimalSize.height)
-                try { previewSurface?.release() } catch (ignored: Throwable) {}
-                previewSurface = Surface(texture)
+
+                val compositorSurf = if (lens.lensType == LensType.ULTRAWIDE) {
+                    motorolaSwitchEngine.compositor.ultraWideCameraSurface
+                } else {
+                    motorolaSwitchEngine.compositor.mainCameraSurface
+                }
+                previewSurface = if (compositorSurf != null && compositorSurf.isValid) {
+                    compositorSurf
+                } else {
+                    Surface(texture)
+                }
+
                 setupImageReaders(lens.cameraId)
                 createCameraCaptureSession()
                 motorolaSwitchEngine.updatePrimaryLens(lens, _availableLenses.value)
+                val elapsedMs = (System.nanoTime() - switchStartNs) / 1_000_000L
+                Log.i(TAG, "[LATENCY] Fallback fast handover to ${lens.lensType} completed in ${elapsedMs}ms")
             }
         } ?: run {
             closeCamera()
@@ -1084,12 +1141,21 @@ class Camera2Engine(private val context: Context) {
                     _isCameraReady.value = false
 
                     // Reuse existing valid surface if available to avoid BufferQueue disconnects
+                    val compositorSurf = if (lens.lensType == LensType.ULTRAWIDE) {
+                        motorolaSwitchEngine.compositor.ultraWideCameraSurface
+                    } else {
+                        motorolaSwitchEngine.compositor.mainCameraSurface
+                    }
                     val curSurf = previewSurface
                     if (curSurf == null || !curSurf.isValid) {
                         try {
                             curSurf?.release()
                         } catch (ignored: Exception) {}
-                        previewSurface = Surface(texture)
+                        previewSurface = if (compositorSurf != null && compositorSurf.isValid) {
+                            compositorSurf
+                        } else {
+                            Surface(texture)
+                        }
                     }
 
                     setupImageReaders(lens.cameraId)
@@ -1124,6 +1190,9 @@ class Camera2Engine(private val context: Context) {
         val prevTexture = previewSurfaceTexture
         previewSurfaceTexture = texture
         if (texture != null) {
+            val optimalSize = _previewBufferSize.value ?: Size(1920, 1080)
+            texture.setDefaultBufferSize(optimalSize.width, optimalSize.height)
+            motorolaSwitchEngine.compositor.setMainViewfinderSurface(Surface(texture), optimalSize.width, optimalSize.height)
             if (prevTexture != texture || cameraDevice == null) {
                 if (_isCameraInitialized.value) {
                     startCamera()
@@ -1132,6 +1201,7 @@ class Camera2Engine(private val context: Context) {
                 reconfigureSession()
             }
         } else {
+            motorolaSwitchEngine.compositor.setMainViewfinderSurface(null, 0, 0)
             closeCamera()
         }
     }
@@ -1199,7 +1269,18 @@ class Camera2Engine(private val context: Context) {
             try {
                 previewSurface?.release()
             } catch (ignored: Throwable) {}
-            previewSurface = Surface(texture)
+
+            motorolaSwitchEngine.compositor.awaitInitialized(300)
+            val compositorSurf = if (lens.lensType == LensType.ULTRAWIDE) {
+                motorolaSwitchEngine.compositor.ultraWideCameraSurface
+            } else {
+                motorolaSwitchEngine.compositor.mainCameraSurface
+            }
+            previewSurface = if (compositorSurf != null && compositorSurf.isValid) {
+                compositorSurf
+            } else {
+                Surface(texture)
+            }
 
             // Setup ImageReader for Photo mode
             setupImageReaders(lens.cameraId)
