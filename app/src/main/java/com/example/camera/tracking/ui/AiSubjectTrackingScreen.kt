@@ -75,6 +75,8 @@ fun AiSubjectTrackingScreen(
             onStopCinematicPan = { viewModel.stopCinematicPan() },
             onCameraLensChanged = { viewModel.setCameraLens(it) },
             onFpsOptionChanged = { viewModel.setTrackingFps(it) },
+            onToggleTrackingResolution = { viewModel.toggleTrackingResolution() },
+            onDismissResolutionNotice = { viewModel.dismissTrackingResolutionNotice() },
             modifier = Modifier.fillMaxSize()
         )
 
@@ -87,6 +89,7 @@ fun AiSubjectTrackingScreen(
                 onTrackingIntensityChanged = { viewModel.setTrackingIntensity(it) },
                 onVideoResolutionChanged = { viewModel.setVideoResolution(it) },
                 onViewfinderResolutionChanged = { viewModel.setViewfinderResolution(it) },
+                onTrackingResolutionChanged = { viewModel.setTrackingResolution(it) },
                 onCameraLensChanged = { viewModel.setCameraLens(it) },
                 onFpsOptionChanged = { viewModel.setTrackingFps(it) },
                 onClearLearnedProfiles = { viewModel.clearLearnedSubjects() },

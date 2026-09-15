@@ -29,6 +29,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import com.example.camera.tracking.model.TrackingCameraLens
 import com.example.camera.tracking.model.TrackingFpsOption
+import com.example.camera.tracking.model.TrackingResolution
 import com.google.mlkit.vision.common.InputImage
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -153,6 +154,14 @@ class CameraXManager(
         if (isCameraRunning.get()) {
             restartCameraSession()
         }
+    }
+
+    @Volatile
+    private var activeTrackingResolution: TrackingResolution = TrackingResolution.HD_720P
+
+    fun setTrackingResolution(resolution: TrackingResolution) {
+        activeTrackingResolution = resolution
+        Log.d(TAG, "Active tracking input resolution set to: ${resolution.label} (${resolution.width}x${resolution.height})")
     }
 
     fun setFps(fpsOption: TrackingFpsOption) {
@@ -611,7 +620,7 @@ class CameraXManager(
 
         val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
         fastJpegStream.reset()
-        yuvImage.compressToJpeg(Rect(0, 0, width, height), 82, fastJpegStream)
+        yuvImage.compressToJpeg(Rect(0, 0, width, height), 75, fastJpegStream)
 
         val bufIdx = activeBufferIndex
         activeBufferIndex = (activeBufferIndex + 1) % 2
@@ -661,23 +670,40 @@ class CameraXManager(
             orientedCanvas?.drawBitmap(decoded, 0f, 0f, null)
         }
 
-        // Lightweight ML downsampled frame (e.g. 360 width, preserving exact aspect ratio)
-        val mlW = 360
-        val mlH = ((mlW.toFloat() * orientedH) / orientedW).toInt()
-        var mlBmp = mlBitmaps[bufIdx]
-        var mlCanvas = mlCanvases[bufIdx]
-        if (mlBmp == null || mlBmp.width != mlW || mlBmp.height != mlH || mlBmp.isRecycled) {
-            mlBmp?.recycle()
-            mlBmp = Bitmap.createBitmap(mlW, mlH, Bitmap.Config.ARGB_8888)
-            mlBitmaps[bufIdx] = mlBmp
-            mlCanvas = Canvas(mlBmp)
-            mlCanvases[bufIdx] = mlCanvas
+        // AI tracking input resolution: 720p (Max 30 FPS Performance) vs 1080p (High Detail Tracking)
+        // Camera preview remains full resolution; this setting only governs the AI tracking input frame.
+        val targetShortDim = if (activeTrackingResolution == TrackingResolution.HD_720P) 720 else 1080
+        val isLandscape = orientedW >= orientedH
+        val mlW = if (isLandscape) {
+            ((targetShortDim.toFloat() * orientedW) / orientedH).toInt().coerceAtLeast(1)
+        } else {
+            targetShortDim
+        }
+        val mlH = if (isLandscape) {
+            targetShortDim
+        } else {
+            ((targetShortDim.toFloat() * orientedH) / orientedW).toInt().coerceAtLeast(1)
         }
 
-        mlCanvas?.drawBitmap(orientedBmp, Rect(0, 0, orientedW, orientedH), Rect(0, 0, mlW, mlH), smoothScalePaint)
-        val mlInputImage = InputImage.fromBitmap(mlBmp, 0)
+        val mlInputImage: InputImage
+        if (orientedW == mlW && orientedH == mlH) {
+            // Direct zero-allocation reuse when dimensions match
+            mlInputImage = InputImage.fromBitmap(orientedBmp, 0)
+        } else {
+            var mlBmp = mlBitmaps[bufIdx]
+            var mlCanvas = mlCanvases[bufIdx]
+            if (mlBmp == null || mlBmp.width != mlW || mlBmp.height != mlH || mlBmp.isRecycled) {
+                mlBmp?.recycle()
+                mlBmp = Bitmap.createBitmap(mlW, mlH, Bitmap.Config.ARGB_8888)
+                mlBitmaps[bufIdx] = mlBmp
+                mlCanvas = Canvas(mlBmp)
+                mlCanvases[bufIdx] = mlCanvas
+            }
+            mlCanvas?.drawBitmap(orientedBmp, Rect(0, 0, orientedW, orientedH), Rect(0, 0, mlW, mlH), smoothScalePaint)
+            mlInputImage = InputImage.fromBitmap(mlBmp, 0)
+        }
 
-        // Deliver high-resolution orientedBitmap for viewfinder/recording and lightweight mlInputImage for tracking
+        // Deliver high-resolution orientedBitmap for viewfinder/recording and tracking-resolution mlInputImage for AI engine
         onFrameAvailable(orientedBmp, mlInputImage, mlW, mlH)
     }
 

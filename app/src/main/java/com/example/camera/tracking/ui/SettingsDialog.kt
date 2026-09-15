@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import com.example.camera.tracking.model.TrackingAspectRatio
 import com.example.camera.tracking.model.TrackingCameraLens
 import com.example.camera.tracking.model.TrackingFpsOption
+import com.example.camera.tracking.model.TrackingResolution
 import com.example.camera.tracking.model.VideoResolution
 import com.example.camera.tracking.model.ViewfinderResolution
 import com.example.camera.tracking.viewmodel.CameraTrackingUiState
@@ -45,6 +46,7 @@ fun SettingsBottomSheet(
     onTrackingIntensityChanged: (Float) -> Unit,
     onVideoResolutionChanged: (VideoResolution) -> Unit,
     onViewfinderResolutionChanged: (ViewfinderResolution) -> Unit = {},
+    onTrackingResolutionChanged: (TrackingResolution) -> Unit = {},
     onCameraLensChanged: (TrackingCameraLens) -> Unit = {},
     onFpsOptionChanged: (TrackingFpsOption) -> Unit = {},
     onClearLearnedProfiles: () -> Unit = {},
@@ -512,6 +514,56 @@ fun SettingsBottomSheet(
                                 text = "${res.width}p",
                                 fontSize = 10.sp,
                                 color = if (isSelected) Color(0xFF99F6E4) else Color(0xFF94A3B8)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider(color = Color(0xFF1E293B))
+
+            // 6b. AI TRACKING INPUT RESOLUTION (720p / 1080p)
+            Spacer(modifier = Modifier.height(12.dp))
+            SettingSectionHeader(
+                icon = Icons.Default.Tune,
+                title = "AI Tracking Input Resolution",
+                subtitle = "Controls resolution fed to ML tracking engine. Preview stays full resolution. 720p defaults for stable 30 FPS."
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TrackingResolution.values().forEach { res ->
+                    val isSelected = uiState.trackingResolution == res
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) Color(0xFF0284C7) else Color(0xFF1E293B)
+                        ),
+                        border = if (isSelected) androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF38BDF8)) else null,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onTrackingResolutionChanged(res) }
+                            .testTag("tracking_res_${res.name}")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = res.label,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = if (res == TrackingResolution.HD_720P) "Default (Fast 30 FPS)" else "High Detail",
+                                fontSize = 10.sp,
+                                color = if (isSelected) Color(0xFFE0F2FE) else Color(0xFF94A3B8)
                             )
                         }
                     }

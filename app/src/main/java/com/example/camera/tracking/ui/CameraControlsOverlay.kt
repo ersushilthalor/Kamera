@@ -51,6 +51,8 @@ fun CameraControlsOverlay(
     onStopCinematicPan: () -> Unit,
     onCameraLensChanged: (TrackingCameraLens) -> Unit = {},
     onFpsOptionChanged: (TrackingFpsOption) -> Unit = {},
+    onToggleTrackingResolution: () -> Unit = {},
+    onDismissResolutionNotice: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -70,7 +72,9 @@ fun CameraControlsOverlay(
             onStartCinematicPan = onStartCinematicPan,
             onStopCinematicPan = onStopCinematicPan,
             onCameraLensChanged = onCameraLensChanged,
-            onFpsOptionChanged = onFpsOptionChanged
+            onFpsOptionChanged = onFpsOptionChanged,
+            onToggleTrackingResolution = onToggleTrackingResolution,
+            onDismissResolutionNotice = onDismissResolutionNotice
         )
 
         // CENTER FIXED STATUS HUD
@@ -101,7 +105,9 @@ private fun TopFixedControlsBar(
     onStartCinematicPan: (Float) -> Unit,
     onStopCinematicPan: () -> Unit,
     onCameraLensChanged: (TrackingCameraLens) -> Unit = {},
-    onFpsOptionChanged: (TrackingFpsOption) -> Unit = {}
+    onFpsOptionChanged: (TrackingFpsOption) -> Unit = {},
+    onToggleTrackingResolution: () -> Unit = {},
+    onDismissResolutionNotice: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -113,7 +119,46 @@ private fun TopFixedControlsBar(
             )
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
-        // Upper row: Back, Ultra AI Status Indicator, FPS, Settings & Camera Flip
+        // Auto-switch notification banner
+        AnimatedVisibility(
+            visible = uiState.trackingResolutionNotice != null,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            uiState.trackingResolutionNotice?.let { notice ->
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF0F172A).copy(alpha = 0.95f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp)
+                        .clickable { onDismissResolutionNotice() }
+                        .testTag("tracking_resolution_notice")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = notice,
+                            fontSize = 11.sp,
+                            color = Color(0xFFFCD34D),
+                            fontWeight = FontWeight.Medium
+                        )
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Dismiss",
+                            tint = Color(0xFFFCD34D),
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Upper row: Back, Ultra AI Status Indicator, Tracking Resolution, FPS, Settings & Camera Flip
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -178,8 +223,28 @@ private fun TopFixedControlsBar(
                 }
             }
 
-            // Top action buttons: FPS, Settings Gear, Camera Flip
+            // Top action buttons: AI Resolution, FPS, Settings Gear, Camera Flip
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // AI Tracking Resolution Badge (720p / 1080p toggle)
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF1E293B),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.6f)),
+                    modifier = Modifier
+                        .clickable { onToggleTrackingResolution() }
+                        .testTag("tracking_res_quick_toggle")
+                ) {
+                    Text(
+                        text = "AI ${uiState.trackingResolution.label}",
+                        color = Color(0xFF00E5FF),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = Color(0xFF1E293B),

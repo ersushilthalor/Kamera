@@ -88,6 +88,11 @@ class CameraTrackingViewModel(application: Application) : AndroidViewModel(appli
     private var frameCount = 0
     private var lastFpsCalcTimeMs = SystemClock.uptimeMillis()
 
+    // Tracking input resolution performance monitoring & auto-fallback
+    private var lastManualResolutionChangeTimeMs = SystemClock.uptimeMillis()
+    private var lowFpsWindowCount = 0
+    private var resolutionNoticeJob: Job? = null
+
     // Recording duration timer
     private var recordingTimerJob: Job? = null
 
@@ -127,6 +132,8 @@ class CameraTrackingViewModel(application: Application) : AndroidViewModel(appli
         )
         cameraXManager = manager
         manager.setFps(_uiState.value.selectedFpsOption)
+        manager.setTrackingResolution(_uiState.value.trackingResolution)
+        manager.setViewfinderResolution(_uiState.value.viewfinderResolution.width, _uiState.value.viewfinderResolution.height)
         val available = manager.getAvailableLenses()
         val preferredLens = preferences.trackingLens
         val targetLens = if (available.contains(preferredLens)) preferredLens else TrackingCameraLens.WIDE
@@ -205,27 +212,40 @@ class CameraTrackingViewModel(application: Application) : AndroidViewModel(appli
     private fun onNewCameraFrame(bitmap: Bitmap, inputImage: InputImage, mlW: Int, mlH: Int) {
         latestSourceBitmap = bitmap
 
-        // Measure FPS
+        // Measure real FPS accurately using elapsed monotonic clock window
         frameCount++
         val nowMs = SystemClock.uptimeMillis()
-        if (nowMs - lastFpsCalcTimeMs >= 1000) {
-            val fps = frameCount
+        val elapsed = nowMs - lastFpsCalcTimeMs
+        if (elapsed >= 1000L) {
+            val measuredFps = ((frameCount * 1000L) / elapsed).toInt()
             frameCount = 0
             lastFpsCalcTimeMs = nowMs
-            _uiState.update { it.copy(fps = fps) }
-        }
+            _uiState.update { it.copy(fps = measuredFps) }
 
-        // Run ML Kit Object Tracking asynchronously without blocking camera stream
-        if (isProcessingMlFrame.compareAndSet(false, true)) {
-            subjectTracker.processFrame(
-                image = inputImage,
-                imageWidth = mlW,
-                imageHeight = mlH,
-                sourceBitmap = bitmap
-            ) {
-                isProcessingMlFrame.set(false)
+            // Automatic fallback: If 1080p AI tracking cannot maintain 30 FPS,
+            // automatically switch to 720p to preserve rock-solid 30 FPS tracking.
+            if (_uiState.value.trackingResolution == TrackingResolution.FHD_1080P) {
+                if (nowMs - lastManualResolutionChangeTimeMs > 3500L) {
+                    if (measuredFps < 26) {
+                        lowFpsWindowCount++
+                        if (lowFpsWindowCount >= 2) {
+                            triggerAutoSwitchTo720p()
+                        }
+                    } else {
+                        lowFpsWindowCount = 0
+                    }
+                }
             }
         }
+
+        // Process frame with decoupled tracking pipeline:
+        // Periodic heavy AI detection + high-speed continuous lightweight tracking on every frame
+        subjectTracker.processFrame(
+            image = inputImage,
+            imageWidth = mlW,
+            imageHeight = mlH,
+            sourceBitmap = bitmap
+        )
 
         _uiState.update { it.copy(currentFrame = bitmap) }
     }
@@ -404,6 +424,48 @@ class CameraTrackingViewModel(application: Application) : AndroidViewModel(appli
     fun setViewfinderResolution(res: ViewfinderResolution) {
         _uiState.update { it.copy(viewfinderResolution = res) }
         cameraXManager?.setViewfinderResolution(res.width, res.height)
+    }
+
+    /**
+     * Sets AI tracking input resolution: 720p (Max 30 FPS Performance) vs 1080p (High Detail Tracking).
+     * Camera preview resolution remains completely unchanged.
+     */
+    fun setTrackingResolution(res: TrackingResolution) {
+        resolutionNoticeJob?.cancel()
+        _uiState.update { it.copy(trackingResolution = res, trackingResolutionNotice = null) }
+        cameraXManager?.setTrackingResolution(res)
+        lastManualResolutionChangeTimeMs = SystemClock.uptimeMillis()
+        lowFpsWindowCount = 0
+        Log.d(TAG, "Tracking input resolution selected: ${res.label}")
+    }
+
+    fun toggleTrackingResolution() {
+        val current = _uiState.value.trackingResolution
+        val next = if (current == TrackingResolution.HD_720P) TrackingResolution.FHD_1080P else TrackingResolution.HD_720P
+        setTrackingResolution(next)
+    }
+
+    fun dismissTrackingResolutionNotice() {
+        resolutionNoticeJob?.cancel()
+        _uiState.update { it.copy(trackingResolutionNotice = null) }
+    }
+
+    private fun triggerAutoSwitchTo720p() {
+        Log.w(TAG, "Performance notice: 1080p AI tracking dropped below 26 FPS. Auto-switching to 720p to maintain smooth 30 FPS.")
+        lowFpsWindowCount = 0
+        _uiState.update {
+            it.copy(
+                trackingResolution = TrackingResolution.HD_720P,
+                trackingResolutionNotice = "⚡ Auto-switched AI tracking to 720p to maintain 30 FPS"
+            )
+        }
+        cameraXManager?.setTrackingResolution(TrackingResolution.HD_720P)
+
+        resolutionNoticeJob?.cancel()
+        resolutionNoticeJob = viewModelScope.launch {
+            delay(3500)
+            _uiState.update { it.copy(trackingResolutionNotice = null) }
+        }
     }
 
     fun toggleGimbal(enabled: Boolean) {

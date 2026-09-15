@@ -55,6 +55,21 @@ enum class ViewfinderResolution(
 }
 
 /**
+ * AI Tracking Input Resolution.
+ * Controls the resolution fed into AI detection and lightweight tracking.
+ * Camera preview resolution remains unchanged.
+ */
+enum class TrackingResolution(
+    val label: String,
+    val width: Int,
+    val height: Int,
+    val description: String
+) {
+    HD_720P("720p HD", 720, 1280, "720p (Maximum 30 FPS Performance)"),
+    FHD_1080P("1080p FHD", 1080, 1920, "1080p (High Detail Tracking)")
+}
+
+/**
  * Supported Output Video Resolutions.
  */
 enum class VideoResolution(
@@ -242,5 +257,7 @@ data class CameraTrackingUiState(
         TrackingCameraLens.FRONT
     ),
     val selectedFpsOption: TrackingFpsOption = TrackingFpsOption.FPS_60,
+    val trackingResolution: TrackingResolution = TrackingResolution.HD_720P,
+    val trackingResolutionNotice: String? = null,
     val learnedSubjectsCount: Int = 0
 )
