@@ -182,10 +182,6 @@ class SubjectTracker(
      */
     @Synchronized
     fun updateContinuousKinematics(dt: Float) {
-        if (status != TrackingStatus.TRACKING_LOCKED && status != TrackingStatus.OCCLUDED_PREDICTING) {
-            return
-        }
-
         val current = activeSubject ?: return
         val safeDt = if (dt.isFinite() && dt > 0f) dt.coerceIn(0.005f, 0.08f) else 0.016f
 
@@ -196,43 +192,43 @@ class SubjectTracker(
 
         val velocityMagnitude = hypot(vx.toDouble(), vy.toDouble()).toFloat()
 
-        // Only extrapolate forward when there is real, deliberate movement (> 0.06 units/sec)
-        // This completely eliminates stationary jitter, bounce-back oscillation, and push-pull vibration!
-        if (velocityMagnitude > 0.06f) {
-            val hw = current.bounds.width / 2f
-            val hh = current.bounds.height / 2f
+        if (status == TrackingStatus.OCCLUDED_PREDICTING) {
+            // Predict during occlusion only: maintain forward trajectory smoothly while target is occluded
+            if (velocityMagnitude > 0.005f) {
+                val hw = current.bounds.width / 2f
+                val hh = current.bounds.height / 2f
 
-            // Smooth linear extrapolation with gentle damping
-            val newCx = (current.bounds.centerX + vx * safeDt * 0.7f).coerceIn(hw, 1f - hw)
-            val newCy = (current.bounds.centerY + vy * safeDt * 0.7f).coerceIn(hh, 1f - hh)
+                val newCx = (current.bounds.centerX + vx * safeDt).coerceIn(hw, 1f - hw)
+                val newCy = (current.bounds.centerY + vy * safeDt).coerceIn(hh, 1f - hh)
 
-            val updatedBounds = NormalizedRect(
-                left = (newCx - hw).coerceIn(0f, 1f),
-                top = (newCy - hh).coerceIn(0f, 1f),
-                right = (newCx + hw).coerceIn(0f, 1f),
-                bottom = (newCy + hh).coerceIn(0f, 1f)
-            )
+                val updatedBounds = NormalizedRect(
+                    left = (newCx - hw).coerceIn(0f, 1f),
+                    top = (newCy - hh).coerceIn(0f, 1f),
+                    right = (newCx + hw).coerceIn(0f, 1f),
+                    bottom = (newCy + hh).coerceIn(0f, 1f)
+                )
 
-            // Damping friction to prevent overshoot and vibration
-            val friction = (1f - 1.5f * safeDt).coerceIn(0.75f, 0.95f)
-
-            activeSubject = current.copy(
-                bounds = updatedBounds,
-                velocityX = vx * friction,
-                velocityY = vy * friction,
-                accelX = ax * friction,
-                accelY = ay * friction
-            )
-            adaptiveLearner?.updateTrackingTelemetry(updatedBounds)
-            onStateUpdated(status, activeSubject, emptyList())
-        } else if (kotlin.math.abs(vx) > 0f || kotlin.math.abs(vy) > 0f) {
-            // Smoothly decay lingering velocities towards zero without moving bounds
-            activeSubject = current.copy(
-                velocityX = vx * 0.75f,
-                velocityY = vy * 0.75f,
-                accelX = 0f,
-                accelY = 0f
-            )
+                val friction = (1f - 1.0f * safeDt).coerceIn(0.85f, 0.98f)
+                activeSubject = current.copy(
+                    bounds = updatedBounds,
+                    velocityX = vx * friction,
+                    velocityY = vy * friction,
+                    accelX = ax * friction,
+                    accelY = ay * friction
+                )
+                onStateUpdated(status, activeSubject, emptyList())
+            }
+        } else if (status == TrackingStatus.TRACKING_LOCKED) {
+            // When actively tracked, CropController acts as the single authoritative temporal filter.
+            // Gently decay velocities if subject pauses.
+            if (velocityMagnitude < 0.008f && (vx != 0f || vy != 0f)) {
+                activeSubject = current.copy(
+                    velocityX = vx * 0.70f,
+                    velocityY = vy * 0.70f,
+                    accelX = 0f,
+                    accelY = 0f
+                )
+            }
         }
     }
 
@@ -376,7 +372,7 @@ class SubjectTracker(
                 motion.lastSeenMs = nowMs
 
                 val speed = if (dt > 0.001f) dist / dt else 0f
-                val isMoving = speed > 0.035f || motion.totalDisplacement >= 0.022f
+                val isMoving = speed > 0.015f || motion.totalDisplacement >= 0.008f
 
                 // STRICT FILTER: AI tracking detects only humans and moving subjects,
                 // while preserving the user's manually locked subject.
@@ -544,55 +540,38 @@ class SubjectTracker(
             missedFrames = 0
             val oldBounds = currentActive?.bounds ?: matched.bounds
 
-            // 1. Deadband on raw ML Kit box coordinates to eliminate detection flutter
             val rawDiffCx = matched.bounds.centerX - oldBounds.centerX
             val rawDiffCy = matched.bounds.centerY - oldBounds.centerY
             val rawDiffDist = kotlin.math.hypot(rawDiffCx.toDouble(), rawDiffCy.toDouble()).toFloat()
 
-            // If subject has barely moved (< 1.2% width, 1.5% height), keep previous bounds stable to eliminate flutter
-            val isMicroJitter = rawDiffDist < 0.012f &&
-                    kotlin.math.abs(matched.bounds.width - oldBounds.width) < 0.015f &&
-                    kotlin.math.abs(matched.bounds.height - oldBounds.height) < 0.015f
-
-            val smoothedBounds = if (currentActive != null && isMicroJitter) {
-                oldBounds
+            // Adaptive continuous box smoothing: responsive when moving, steady when stationary
+            val speedAdapt = (1.0f + rawDiffDist * 8.0f).coerceIn(1.0f, 3.0f)
+            val boxAlpha = if (currentActive != null && missedFrames == 0) {
+                (safeDt * 9f * trackingSpeedIntensity.coerceIn(0.6f, 2.5f) * speedAdapt).coerceIn(0.18f, 0.75f)
             } else {
-                val boxAlpha = if (currentActive != null && missedFrames == 0) {
-                    (safeDt * 6f * trackingSpeedIntensity.coerceIn(0.6f, 2.5f)).coerceIn(0.12f, 0.55f)
-                } else {
-                    1.0f
-                }
-                NormalizedRect(
-                    left = oldBounds.left + (matched.bounds.left - oldBounds.left) * boxAlpha,
-                    top = oldBounds.top + (matched.bounds.top - oldBounds.top) * boxAlpha,
-                    right = oldBounds.right + (matched.bounds.right - oldBounds.right) * boxAlpha,
-                    bottom = oldBounds.bottom + (matched.bounds.bottom - oldBounds.bottom) * boxAlpha
-                )
+                1.0f
             }
+
+            val smoothedBounds = NormalizedRect(
+                left = oldBounds.left + (matched.bounds.left - oldBounds.left) * boxAlpha,
+                top = oldBounds.top + (matched.bounds.top - oldBounds.top) * boxAlpha,
+                right = oldBounds.right + (matched.bounds.right - oldBounds.right) * boxAlpha,
+                bottom = oldBounds.bottom + (matched.bounds.bottom - oldBounds.bottom) * boxAlpha
+            )
 
             val deltaX = smoothedBounds.centerX - oldBounds.centerX
             val deltaY = smoothedBounds.centerY - oldBounds.centerY
-            val deltaDist = kotlin.math.hypot(deltaX.toDouble(), deltaY.toDouble()).toFloat()
 
-            // Only register velocity when movement is deliberate (> 1% of frame)
-            val effectiveDeltaX = if (deltaDist > 0.010f) deltaX else 0f
-            val effectiveDeltaY = if (deltaDist > 0.010f) deltaY else 0f
-
-            val rawVx = (effectiveDeltaX / safeDt).coerceIn(-2.5f, 2.5f)
-            val rawVy = (effectiveDeltaY / safeDt).coerceIn(-2.5f, 2.5f)
+            val rawVx = (deltaX / safeDt).coerceIn(-3.0f, 3.0f)
+            val rawVy = (deltaY / safeDt).coerceIn(-3.0f, 3.0f)
 
             val oldVx = currentActive?.velocityX ?: 0f
             val oldVy = currentActive?.velocityY ?: 0f
 
-            // Critically damped velocity smoothing: decay quickly to 0 when stationary
-            val vBlend = if (deltaDist > 0.010f) {
-                (safeDt * 5f * trackingSpeedIntensity.coerceIn(0.8f, 2.5f)).coerceIn(0.12f, 0.50f)
-            } else {
-                0.25f
-            }
-
-            val smoothedVx = if (deltaDist > 0.010f) (oldVx * (1f - vBlend) + rawVx * vBlend) else (oldVx * 0.50f)
-            val smoothedVy = if (deltaDist > 0.010f) (oldVy * (1f - vBlend) + rawVy * vBlend) else (oldVy * 0.50f)
+            // Symmetrical critically-damped velocity smoothing for both X and Y
+            val vBlend = (safeDt * 8f * trackingSpeedIntensity.coerceIn(0.8f, 2.5f)).coerceIn(0.15f, 0.60f)
+            val smoothedVx = oldVx * (1f - vBlend) + rawVx * vBlend
+            val smoothedVy = oldVy * (1f - vBlend) + rawVy * vBlend
 
             val rawAx = ((smoothedVx - oldVx) / safeDt).coerceIn(-6.0f, 6.0f)
             val rawAy = ((smoothedVy - oldVy) / safeDt).coerceIn(-6.0f, 6.0f)

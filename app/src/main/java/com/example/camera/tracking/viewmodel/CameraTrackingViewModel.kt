@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 typealias CameraTrackingUiState = com.example.camera.tracking.model.CameraTrackingUiState
 
@@ -80,7 +81,7 @@ class CameraTrackingViewModel(application: Application) : AndroidViewModel(appli
     // Frame references
     @Volatile
     private var latestSourceBitmap: Bitmap? = null
-    private var isProcessingMlFrame = false
+    private val isProcessingMlFrame = AtomicBoolean(false)
 
     // Timing & FPS metrics
     private var lastFrameTimeNs = System.nanoTime()
@@ -120,8 +121,8 @@ class CameraTrackingViewModel(application: Application) : AndroidViewModel(appli
         val manager = CameraXManager(
             context = context,
             lifecycleOwner = lifecycleOwner,
-            onFrameAvailable = { bitmap, inputImage ->
-                onNewCameraFrame(bitmap, inputImage)
+            onFrameAvailable = { bitmap, inputImage, mlW, mlH ->
+                onNewCameraFrame(bitmap, inputImage, mlW, mlH)
             }
         )
         cameraXManager = manager
@@ -201,7 +202,7 @@ class CameraTrackingViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
-    private fun onNewCameraFrame(bitmap: Bitmap, inputImage: InputImage) {
+    private fun onNewCameraFrame(bitmap: Bitmap, inputImage: InputImage, mlW: Int, mlH: Int) {
         latestSourceBitmap = bitmap
 
         // Measure FPS
@@ -215,15 +216,14 @@ class CameraTrackingViewModel(application: Application) : AndroidViewModel(appli
         }
 
         // Run ML Kit Object Tracking asynchronously without blocking camera stream
-        if (!isProcessingMlFrame) {
-            isProcessingMlFrame = true
+        if (isProcessingMlFrame.compareAndSet(false, true)) {
             subjectTracker.processFrame(
                 image = inputImage,
-                imageWidth = bitmap.width,
-                imageHeight = bitmap.height,
+                imageWidth = mlW,
+                imageHeight = mlH,
                 sourceBitmap = bitmap
             ) {
-                isProcessingMlFrame = false
+                isProcessingMlFrame.set(false)
             }
         }
 

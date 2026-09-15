@@ -193,7 +193,7 @@ private fun TopFixedControlsBar(
                         .testTag("fps_toggle_button")
                 ) {
                     Text(
-                        text = "${uiState.selectedFpsOption.label}",
+                        text = if (uiState.fps > 0) "${uiState.fps} FPS" else uiState.selectedFpsOption.label,
                         color = Color(0xFF38BDF8),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,

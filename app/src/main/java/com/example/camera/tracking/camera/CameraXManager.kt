@@ -4,8 +4,14 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.ImageFormat
 import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.RectF
+import android.graphics.YuvImage
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
@@ -27,6 +33,40 @@ import com.google.mlkit.vision.common.InputImage
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
+ * High-performance, zero-allocation byte array output stream for hardware JPEG encoding.
+ * Exposes internal buffer and count directly, preventing any array cloning during continuous streaming.
+ */
+private class FastByteArrayOutputStream(initialCapacity: Int) : java.io.OutputStream() {
+    var buffer = ByteArray(initialCapacity)
+        private set
+    var count = 0
+        private set
+
+    fun reset() {
+        count = 0
+    }
+
+    override fun write(b: Int) {
+        ensureCapacity(count + 1)
+        buffer[count++] = b.toByte()
+    }
+
+    override fun write(b: ByteArray, off: Int, len: Int) {
+        ensureCapacity(count + len)
+        System.arraycopy(b, off, buffer, count, len)
+        count += len
+    }
+
+    private fun ensureCapacity(minCapacity: Int) {
+        if (minCapacity > buffer.size) {
+            var newCap = buffer.size * 2
+            if (newCap < minCapacity) newCap = minCapacity
+            buffer = buffer.copyOf(newCap)
+        }
+    }
+}
+
+/**
  * Camera hardware lens & capture session manager for AI Subject Tracking.
  * Implements REAL physical lens switching using Camera2 IDs and lens metadata,
  * supporting the physical ultra-wide camera on Motorola moto g96 5G and all Android devices.
@@ -35,7 +75,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class CameraXManager(
     private val context: Context,
     private val lifecycleOwner: LifecycleOwner,
-    private val onFrameAvailable: (Bitmap, InputImage) -> Unit
+    private val onFrameAvailable: (Bitmap, InputImage, Int, Int) -> Unit
 ) {
     companion object {
         private const val TAG = "CameraXManager"
@@ -64,6 +104,10 @@ class CameraXManager(
     private var cameraThread: HandlerThread? = null
     private var cameraHandler: Handler? = null
 
+    // Dedicated asynchronous frame processing worker
+    private var frameProcessingThread: HandlerThread? = null
+    private var frameHandler: Handler? = null
+
     private var currentCameraDevice: CameraDevice? = null
     private var currentCaptureSession: CameraCaptureSession? = null
     private var imageReader: ImageReader? = null
@@ -72,6 +116,26 @@ class CameraXManager(
     private val isCameraRunning = AtomicBoolean(false)
     private val cameraLock = Any()
     private var isProcessingFrame = AtomicBoolean(false)
+
+    // Reusable double-buffer graphics structures to eliminate GC allocations during continuous streaming
+    private var cachedNv21: ByteArray? = null
+    private val fastJpegStream = FastByteArrayOutputStream(1024 * 512)
+    private val decodeOptions = BitmapFactory.Options().apply {
+        inMutable = true
+        inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
+
+    private var activeBufferIndex = 0
+    private val decodedBitmaps = arrayOfNulls<Bitmap>(2)
+    private val orientedBitmaps = arrayOfNulls<Bitmap>(2)
+    private val orientedCanvases = arrayOfNulls<Canvas>(2)
+    private val mlBitmaps = arrayOfNulls<Bitmap>(2)
+    private val mlCanvases = arrayOfNulls<Canvas>(2)
+
+    private val smoothScalePaint = Paint().apply {
+        isFilterBitmap = true
+        isAntiAlias = true
+    }
 
     val isUsingFrontCamera: Boolean get() = activeLens.isFront
 
@@ -169,12 +233,31 @@ class CameraXManager(
 
     fun release() {
         stopCamera()
+
+        frameProcessingThread?.quitSafely()
+        try {
+            frameProcessingThread?.join(500)
+        } catch (ignored: Exception) {}
+        frameProcessingThread = null
+        frameHandler = null
+
         cameraThread?.quitSafely()
         try {
             cameraThread?.join(500)
         } catch (ignored: Exception) {}
         cameraThread = null
         cameraHandler = null
+
+        for (i in 0 until 2) {
+            decodedBitmaps[i]?.recycle()
+            decodedBitmaps[i] = null
+            orientedBitmaps[i]?.recycle()
+            orientedBitmaps[i] = null
+            orientedCanvases[i] = null
+            mlBitmaps[i]?.recycle()
+            mlBitmaps[i] = null
+            mlCanvases[i] = null
+        }
     }
 
     private fun ensureThreadStarted() {
@@ -183,6 +266,12 @@ class CameraXManager(
             thread.start()
             cameraThread = thread
             cameraHandler = Handler(thread.looper)
+        }
+        if (frameProcessingThread == null || !frameProcessingThread!!.isAlive) {
+            val thread = HandlerThread("TrackingFrameWorker")
+            thread.start()
+            frameProcessingThread = thread
+            frameHandler = Handler(thread.looper)
         }
     }
 
@@ -317,7 +406,7 @@ class CameraXManager(
                 optimalSize.width,
                 optimalSize.height,
                 ImageFormat.YUV_420_888,
-                2
+                3
             )
             imageReader = reader
 
@@ -459,8 +548,9 @@ class CameraXManager(
     }
 
     /**
-     * Reads frames from ImageReader (YUV_420_888), converts to Bitmap with correct orientation,
-     * builds ML Kit InputImage, and delivers to the tracking pipeline.
+     * Reads frames from ImageReader (YUV_420_888). Stale frames are immediately acquired and dropped.
+     * Conversion to Bitmap and ML InputImage is performed asynchronously on a dedicated worker thread,
+     * ensuring Camera2 callbacks and camera capture are never blocked.
      */
     private fun processImageFromReader(reader: ImageReader, sensorOrientation: Int, isFront: Boolean) {
         val image = try {
@@ -469,48 +559,135 @@ class CameraXManager(
             null
         } ?: return
 
-        try {
-            if (isProcessingFrame.compareAndSet(false, true)) {
-                val bitmap = yuv420888ToBitmap(image)
-                val orientedBitmap = if (sensorOrientation != 0 || isFront) {
-                    val matrix = Matrix().apply {
-                        if (sensorOrientation != 0) postRotate(sensorOrientation.toFloat())
-                        if (isFront) postScale(-1f, 1f)
+        if (isProcessingFrame.compareAndSet(false, true)) {
+            val worker = frameHandler
+            if (worker != null) {
+                worker.post {
+                    try {
+                        processImage(image, sensorOrientation, isFront)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Error processing camera frame: ${t.message}")
+                    } finally {
+                        try {
+                            image.close()
+                        } catch (ignored: Exception) {}
+                        isProcessingFrame.set(false)
                     }
-                    val transformed = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-                    if (transformed != bitmap) {
-                        bitmap.recycle()
-                    }
-                    transformed
-                } else {
-                    bitmap
                 }
-
-                val inputImage = InputImage.fromBitmap(orientedBitmap, 0)
-                onFrameAvailable(orientedBitmap, inputImage)
+            } else {
+                try {
+                    image.close()
+                } catch (ignored: Exception) {}
                 isProcessingFrame.set(false)
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Error processing camera frame: ${e.message}")
-            isProcessingFrame.set(false)
-        } finally {
-            image.close()
+        } else {
+            // Drop older frame immediately to maintain bounded backpressure without stalling the camera HAL
+            try {
+                image.close()
+            } catch (ignored: Exception) {}
         }
     }
 
-    private var cachedPixels: IntArray? = null
-    private var cachedYBytes: ByteArray? = null
-    private var cachedUBytes: ByteArray? = null
-    private var cachedVBytes: ByteArray? = null
-
     /**
-     * Fast, zero-crash YUV_420_888 to ARGB_8888 Bitmap converter.
-     * Uses cached byte and pixel arrays to eliminate GC churn during continuous 60fps tracking.
+     * Highly optimized native-accelerated YUV_420_888 conversion:
+     * 1. Fast block buffer copy from YUV_420_888 planes into reusable NV21 buffer (zero pixel loops).
+     * 2. Native hardware JPEG compression via YuvImage and zero-allocation FastByteArrayOutputStream.
+     * 3. Native Skia decoding with inBitmap buffer reuse (zero Bitmap allocations per frame).
+     * 4. Hardware matrix rotation into reusable oriented Bitmap.
+     * 5. Lightweight downscaled frame for ML Kit object tracking (e.g. 360x640) for rapid 30+ FPS inference.
      */
-    private fun yuv420888ToBitmap(image: Image): Bitmap {
+    private fun processImage(image: Image, sensorOrientation: Int, isFront: Boolean) {
         val width = image.width
         val height = image.height
 
+        val nv21Size = width * height * 3 / 2
+        var nv21 = cachedNv21
+        if (nv21 == null || nv21.size < nv21Size) {
+            nv21 = ByteArray(nv21Size)
+            cachedNv21 = nv21
+        }
+
+        imageToNv21(image, nv21)
+
+        val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
+        fastJpegStream.reset()
+        yuvImage.compressToJpeg(Rect(0, 0, width, height), 82, fastJpegStream)
+
+        val bufIdx = activeBufferIndex
+        activeBufferIndex = (activeBufferIndex + 1) % 2
+
+        var decodedBmp = decodedBitmaps[bufIdx]
+        if (decodedBmp == null || decodedBmp.width != width || decodedBmp.height != height || decodedBmp.isRecycled) {
+            decodedBmp?.recycle()
+            decodedBmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            decodedBitmaps[bufIdx] = decodedBmp
+        }
+
+        decodeOptions.inBitmap = decodedBmp
+        val decoded = try {
+            BitmapFactory.decodeByteArray(fastJpegStream.buffer, 0, fastJpegStream.count, decodeOptions)
+        } catch (e: Exception) {
+            decodeOptions.inBitmap = null
+            BitmapFactory.decodeByteArray(fastJpegStream.buffer, 0, fastJpegStream.count, decodeOptions)
+        } ?: return
+
+        val isRotated = sensorOrientation == 90 || sensorOrientation == 270
+        val orientedW = if (isRotated) height else width
+        val orientedH = if (isRotated) width else height
+
+        var orientedBmp = orientedBitmaps[bufIdx]
+        var orientedCanvas = orientedCanvases[bufIdx]
+        if (orientedBmp == null || orientedBmp.width != orientedW || orientedBmp.height != orientedH || orientedBmp.isRecycled) {
+            orientedBmp?.recycle()
+            orientedBmp = Bitmap.createBitmap(orientedW, orientedH, Bitmap.Config.ARGB_8888)
+            orientedBitmaps[bufIdx] = orientedBmp
+            orientedCanvas = Canvas(orientedBmp)
+            orientedCanvases[bufIdx] = orientedCanvas
+        }
+
+        if (sensorOrientation != 0 || isFront) {
+            val matrix = Matrix()
+            if (sensorOrientation != 0) {
+                matrix.postRotate(sensorOrientation.toFloat())
+            }
+            if (isFront) {
+                matrix.postScale(-1f, 1f)
+            }
+            val rect = RectF(0f, 0f, decoded.width.toFloat(), decoded.height.toFloat())
+            matrix.mapRect(rect)
+            matrix.postTranslate(-rect.left, -rect.top)
+            orientedCanvas?.drawBitmap(decoded, matrix, null)
+        } else {
+            orientedCanvas?.drawBitmap(decoded, 0f, 0f, null)
+        }
+
+        // Lightweight ML downsampled frame (e.g. 360 width, preserving exact aspect ratio)
+        val mlW = 360
+        val mlH = ((mlW.toFloat() * orientedH) / orientedW).toInt()
+        var mlBmp = mlBitmaps[bufIdx]
+        var mlCanvas = mlCanvases[bufIdx]
+        if (mlBmp == null || mlBmp.width != mlW || mlBmp.height != mlH || mlBmp.isRecycled) {
+            mlBmp?.recycle()
+            mlBmp = Bitmap.createBitmap(mlW, mlH, Bitmap.Config.ARGB_8888)
+            mlBitmaps[bufIdx] = mlBmp
+            mlCanvas = Canvas(mlBmp)
+            mlCanvases[bufIdx] = mlCanvas
+        }
+
+        mlCanvas?.drawBitmap(orientedBmp, Rect(0, 0, orientedW, orientedH), Rect(0, 0, mlW, mlH), smoothScalePaint)
+        val mlInputImage = InputImage.fromBitmap(mlBmp, 0)
+
+        // Deliver high-resolution orientedBitmap for viewfinder/recording and lightweight mlInputImage for tracking
+        onFrameAvailable(orientedBmp, mlInputImage, mlW, mlH)
+    }
+
+    /**
+     * Fast bulk transfer from YUV_420_888 Image planes to an NV21 byte array.
+     * Uses direct buffer memory copies for Y, and rapid 2-byte interleaving for UV.
+     */
+    private fun imageToNv21(image: Image, output: ByteArray) {
+        val width = image.width
+        val height = image.height
         val yPlane = image.planes[0]
         val uPlane = image.planes[1]
         val vPlane = image.planes[2]
@@ -519,64 +696,51 @@ class CameraXManager(
         val uBuffer = uPlane.buffer
         val vBuffer = vPlane.buffer
 
-        val ySize = yBuffer.remaining()
-        val uSize = uBuffer.remaining()
-        val vSize = vBuffer.remaining()
-
-        var yBytes = cachedYBytes
-        if (yBytes == null || yBytes.size < ySize) {
-            yBytes = ByteArray(ySize)
-            cachedYBytes = yBytes
-        }
-        yBuffer.get(yBytes, 0, ySize)
-
-        var uBytes = cachedUBytes
-        if (uBytes == null || uBytes.size < uSize) {
-            uBytes = ByteArray(uSize)
-            cachedUBytes = uBytes
-        }
-        uBuffer.get(uBytes, 0, uSize)
-
-        var vBytes = cachedVBytes
-        if (vBytes == null || vBytes.size < vSize) {
-            vBytes = ByteArray(vSize)
-            cachedVBytes = vBytes
-        }
-        vBuffer.get(vBytes, 0, vSize)
-
-        val totalPixels = width * height
-        var pixels = cachedPixels
-        if (pixels == null || pixels.size < totalPixels) {
-            pixels = IntArray(totalPixels)
-            cachedPixels = pixels
-        }
-
         val yRowStride = yPlane.rowStride
         val yPixelStride = yPlane.pixelStride
         val uvRowStride = uPlane.rowStride
         val uvPixelStride = uPlane.pixelStride
 
-        var pixelIndex = 0
-        for (y in 0 until height) {
-            val yOffset = y * yRowStride
-            val uvOffset = (y shr 1) * uvRowStride
-
-            for (x in 0 until width) {
-                val yVal = (yBytes[yOffset + x * yPixelStride].toInt() and 0xFF)
-                val uvIdx = uvOffset + (x shr 1) * uvPixelStride
-                val uVal = (uBytes[uvIdx].toInt() and 0xFF) - 128
-                val vVal = (vBytes[uvIdx].toInt() and 0xFF) - 128
-
-                val y1192 = 1192 * (yVal - 16).coerceAtLeast(0)
-                val r = ((y1192 + 1634 * vVal) shr 10).coerceIn(0, 255)
-                val g = ((y1192 - 833 * vVal - 400 * uVal) shr 10).coerceIn(0, 255)
-                val b = ((y1192 + 2066 * uVal) shr 10).coerceIn(0, 255)
-
-                pixels[pixelIndex++] = -0x1000000 or (r shl 16) or (g shl 8) or b
+        var pos = 0
+        // Bulk copy Y plane
+        if (yPixelStride == 1) {
+            if (yRowStride == width) {
+                val ySize = width * height
+                yBuffer.position(0)
+                yBuffer.get(output, 0, ySize)
+                pos = ySize
+            } else {
+                for (row in 0 until height) {
+                    yBuffer.position(row * yRowStride)
+                    yBuffer.get(output, pos, width)
+                    pos += width
+                }
+            }
+        } else {
+            for (row in 0 until height) {
+                val rowStart = row * yRowStride
+                for (col in 0 until width) {
+                    output[pos++] = yBuffer.get(rowStart + col * yPixelStride)
+                }
             }
         }
 
-        return Bitmap.createBitmap(pixels, 0, width, width, height, Bitmap.Config.ARGB_8888)
+        // Interleave UV planes (NV21 format: V then U)
+        val uvWidth = width / 2
+        val uvHeight = height / 2
+        val vRowStride = vPlane.rowStride
+        val vPixelStride = vPlane.pixelStride
+        val uRowStride = uPlane.rowStride
+        val uPixelStride = uPlane.pixelStride
+
+        for (row in 0 until uvHeight) {
+            val vRowOffset = row * vRowStride
+            val uRowOffset = row * uRowStride
+            for (col in 0 until uvWidth) {
+                output[pos++] = vBuffer.get(vRowOffset + col * vPixelStride)
+                output[pos++] = uBuffer.get(uRowOffset + col * uPixelStride)
+            }
+        }
     }
 
     /**

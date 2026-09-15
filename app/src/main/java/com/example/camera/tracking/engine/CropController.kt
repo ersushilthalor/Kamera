@@ -123,39 +123,25 @@ class CropController(
                 onCinematicPanFinished?.invoke()
             }
         } else {
-            // Standard Subject Tracking Mode with rock-solid stability and zero micro-jitter
+            // Single Authoritative Adaptive Temporal Filter for subject center movement.
+            // X and Y use the exact same symmetrical tracking model with zero deadband loss,
+            // strong jitter suppression when stationary, and rapid low-latency response during movement.
             val clampedTargetX = targetCenterX.coerceIn(halfW, 1f - halfW)
             val clampedTargetY = targetCenterY.coerceIn(halfH, 1f - halfH)
 
-            // Generous deadzone box: prevents preview & recorded video from vibrating or bobbing up and down
             val diffX = clampedTargetX - currentCenterX
             val diffY = clampedTargetY - currentCenterY
+            val dist = hypot(diffX.toDouble(), diffY.toDouble()).toFloat()
 
-            val deadzoneX = 0.020f
-            val deadzoneY = 0.028f // Generous vertical deadzone so vertical posture/breathing oscillations don't shake the frame
+            if (dist > 0.0005f) {
+                // Adaptive response: smoothly accelerates cutoff frequency as distance/speed increases
+                // Eliminates sensor/detector flutter near rest, while tracking rapid movement without lag or overshoot
+                val speedFactor = (1.0f + (dist / 0.035f).let { it * it }).coerceIn(1.0f, 6.0f)
+                val k = (4.5f * trackingIntensity.coerceIn(0.5f, 2.5f) * speedFactor).coerceIn(3.5f, 24.0f)
+                val blend = (1f - kotlin.math.exp(-k * dt).toFloat()).coerceIn(0.04f, 0.70f)
 
-            val effectiveDiffX = when {
-                diffX > deadzoneX -> diffX - deadzoneX
-                diffX < -deadzoneX -> diffX + deadzoneX
-                else -> 0f
-            }
-
-            val effectiveDiffY = when {
-                diffY > deadzoneY -> diffY - deadzoneY
-                diffY < -deadzoneY -> diffY + deadzoneY
-                else -> 0f
-            }
-
-            val effectiveDist = hypot(effectiveDiffX.toDouble(), effectiveDiffY.toDouble()).toFloat()
-
-            if (effectiveDist > 0f) {
-                // Adaptive progressive tracking: buttery smooth for normal motion, responsive for fast moves
-                val speedFactor = (1.0f + effectiveDist * 8.0f).coerceIn(1.0f, 3.5f)
-                val k = (4.5f * trackingIntensity.coerceIn(0.5f, 2.5f) * speedFactor).coerceIn(2.5f, 15f)
-                val blend = (1f - kotlin.math.exp(-k * dt).toFloat()).coerceIn(0.02f, 0.40f)
-
-                currentCenterX += effectiveDiffX * blend
-                currentCenterY += effectiveDiffY * blend
+                currentCenterX += diffX * blend
+                currentCenterY += diffY * blend
             }
         }
 
