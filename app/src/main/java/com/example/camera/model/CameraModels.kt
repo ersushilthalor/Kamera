@@ -445,3 +445,26 @@ data class TapFocusConfig(
     val autoDismissReticle: Boolean = true
 )
 
+enum class BackgroundCameraStatus(val label: String, val shortDesc: String) {
+    OFF("Off", "Standby Disabled"),
+    PREPARING("Preparing", "Starting background stream..."),
+    READY_QUIET("Ready (Quiet)", "Ready in background (invisible)"),
+    READY_PREVIEW("Live Preview", "Streaming to little preview"),
+    FALLBACK_TURBO("Turbo Handover", "Fast normal switching active"),
+    UNAVAILABLE("Unavailable", "Camera not present or in use")
+}
+
+data class MotorolaInstantSwitchState(
+    val isKeepUltraWideReady: Boolean = true,
+    val isShowUltraWidePreview: Boolean = false,
+    val isKeepFrontCameraReady: Boolean = true,
+    val isShowFrontCameraPreview: Boolean = false,
+    val ultraWideStatus: BackgroundCameraStatus = BackgroundCameraStatus.OFF,
+    val frontStatus: BackgroundCameraStatus = BackgroundCameraStatus.OFF,
+    val isMotorolaDevice: Boolean = false,
+    val isConcurrentHardwareSupported: Boolean = true,
+    val activeStandbyLens: LensType? = null,
+    val switchLatencyEstimateMs: Int = 15,
+    val statusMessage: String = "Motorola Instant Switching Ready"
+)
+

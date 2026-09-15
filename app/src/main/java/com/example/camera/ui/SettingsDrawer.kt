@@ -162,6 +162,12 @@ fun SettingsDrawer(
     onSelectPipelinePreset: (com.example.camera.pipeline.model.PipelinePreset) -> Unit = {},
     onOpenPipelineStudio: () -> Unit = {},
     onOpenBeforeAfter: () -> Unit = {},
+    // Motorola Instant Camera Switching
+    instantSwitchState: MotorolaInstantSwitchState = MotorolaInstantSwitchState(),
+    onKeepUltraWideReadyToggle: (Boolean) -> Unit = {},
+    onShowUltraWidePreviewToggle: (Boolean) -> Unit = {},
+    onKeepFrontCameraReadyToggle: (Boolean) -> Unit = {},
+    onShowFrontCameraPreviewToggle: (Boolean) -> Unit = {},
     // UI Customization callbacks
     uiCustomizationState: UiCustomizationState = UiCustomizationState(),
     onSelectTemplate: (UiTemplateType) -> Unit = {},
@@ -779,6 +785,103 @@ fun SettingsDrawer(
                                             Spacer(modifier = Modifier.width(8.dp))
                                             Text("Deep Scan Auxiliary Lenses")
                                         }
+                                    }
+                                }
+
+                                item {
+                                    SettingsSectionCard(title = "Instant Camera Switching (Motorola Optimized)") {
+                                        // Hardware Profile Header Banner
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(Color(0xFFE8F0FE))
+                                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.ElectricBolt,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFF1A73E8),
+                                                    modifier = Modifier.size(22.dp)
+                                                )
+                                                Column {
+                                                    Text(
+                                                        text = if (instantSwitchState.isMotorolaDevice) {
+                                                            "Motorola Hardware Profile: Optimized"
+                                                        } else {
+                                                            "Motorola Dual-Camera Pipeline Engine"
+                                                        },
+                                                        fontSize = 12.5.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color(0xFF1A73E8)
+                                                    )
+                                                    Text(
+                                                        text = instantSwitchState.statusMessage,
+                                                        fontSize = 11.sp,
+                                                        color = Color(0xFF3C4043)
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Text(
+                                            text = "Ultra-Wide",
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF1F2937)
+                                        )
+
+                                        LightToggleRow(
+                                            title = "Keep Ultra-Wide Ready",
+                                            subtitle = "When enabled, while using 1× camera, keeps the ultra-wide running quietly in the background so it is already ready when selected.",
+                                            isChecked = instantSwitchState.isKeepUltraWideReady,
+                                            onToggle = { onKeepUltraWideReadyToggle(!instantSwitchState.isKeepUltraWideReady) }
+                                        )
+
+                                        LightToggleRow(
+                                            title = "Show Ultra-Wide Little Preview",
+                                            subtitle = "When enabled, shows a small live preview of the background ultra-wide camera while using 1×. Tap the preview window to switch immediately.",
+                                            isChecked = instantSwitchState.isShowUltraWidePreview,
+                                            onToggle = { onShowUltraWidePreviewToggle(!instantSwitchState.isShowUltraWidePreview) }
+                                        )
+
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        HorizontalDivider(color = Color(0xFFE5E7EB))
+                                        Spacer(modifier = Modifier.height(10.dp))
+
+                                        Text(
+                                            text = "Front Camera",
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF1F2937)
+                                        )
+
+                                        LightToggleRow(
+                                            title = "Keep Front Camera Ready",
+                                            subtitle = "When enabled, keeps the front camera prepared in the background while using the rear camera for minimum possible delay.",
+                                            isChecked = instantSwitchState.isKeepFrontCameraReady,
+                                            onToggle = { onKeepFrontCameraReadyToggle(!instantSwitchState.isKeepFrontCameraReady) }
+                                        )
+
+                                        LightToggleRow(
+                                            title = "Show Front Camera Little Preview",
+                                            subtitle = "When enabled, shows a small live preview of the front camera while using the rear camera.",
+                                            isChecked = instantSwitchState.isShowFrontCameraPreview,
+                                            onToggle = { onShowFrontCameraPreviewToggle(!instantSwitchState.isShowFrontCameraPreview) }
+                                        )
+
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Text(
+                                            text = "Motorola Reliability: The Ready and Little Preview options work independently. If simultaneous background camera operation is unsupported on a particular Motorola model or firmware version, the fastest normal switching method is automatically used without causing crashes.",
+                                            fontSize = 11.sp,
+                                            color = Color(0xFF6B7280),
+                                            lineHeight = 15.sp
+                                        )
                                     }
                                 }
                             }

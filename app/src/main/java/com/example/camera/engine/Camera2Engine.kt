@@ -70,6 +70,7 @@ class Camera2Engine(private val context: Context) {
     private var imageReaderRaw: ImageReader? = null
     private var imageReaderYuv: ImageReader? = null
     val customImagePipelineEngine by lazy { com.example.camera.pipeline.engine.CustomImagePipelineEngine(context) }
+    val motorolaSwitchEngine by lazy { MotorolaInstantSwitchEngine(context) }
     private var mediaRecorder: MediaRecorder? = null
     private var videoRecordingFileDescriptor: ParcelFileDescriptor? = null
     private var currentRecordingTempFile: File? = null
@@ -673,6 +674,7 @@ class Camera2Engine(private val context: Context) {
                     currentZoom = validSelection.baseZoomRatio
                     _currentZoom.value = validSelection.baseZoomRatio
                 }
+                motorolaSwitchEngine.updatePrimaryLens(validSelection, sortedLenses)
             }
 
             Log.i(TAG, "Total discovered lenses after deep scan: ${sortedLenses.size}")
@@ -897,11 +899,47 @@ class Camera2Engine(private val context: Context) {
             previousLens?.facing == lens.facing &&
             cameraDevice != null) {
             updatePreviewSettings()
+            motorolaSwitchEngine.updatePrimaryLens(lens, _availableLenses.value)
+            return
+        }
+
+        // Motorola Instant Handover: check if target lens is already warm and running in background
+        val warmDevice = motorolaSwitchEngine.handoffBackgroundCamera(lens)
+        if (warmDevice != null) {
+            inspectCapabilities(lens.cameraId)
+            switchWithWarmCamera(warmDevice, lens)
             return
         }
 
         inspectCapabilities(lens.cameraId)
         restartCamera()
+    }
+
+    private fun switchWithWarmCamera(warmDevice: CameraDevice, lens: LensInfo) {
+        startBackgroundThread()
+        backgroundHandler?.post {
+            synchronized(cameraLifecycleLock) {
+                val oldDevice = cameraDevice
+                closeCameraCaptureSession()
+                try {
+                    oldDevice?.close()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error closing previous camera during warm handover", e)
+                }
+                cameraDevice = warmDevice
+                val texture = previewSurfaceTexture ?: return@synchronized
+                val optimalSize = _previewBufferSize.value ?: Size(1920, 1080)
+                texture.setDefaultBufferSize(optimalSize.width, optimalSize.height)
+                try { previewSurface?.release() } catch (ignored: Throwable) {}
+                previewSurface = Surface(texture)
+                setupImageReaders(lens.cameraId)
+                createCameraCaptureSession()
+                motorolaSwitchEngine.updatePrimaryLens(lens, _availableLenses.value)
+            }
+        } ?: run {
+            closeCamera()
+            startCamera()
+        }
     }
 
     /**
@@ -1179,6 +1217,7 @@ class Camera2Engine(private val context: Context) {
                         }
                     }
                     createCameraCaptureSession()
+                    motorolaSwitchEngine.updatePrimaryLens(_selectedLens.value, _availableLenses.value)
                 }
 
                 override fun onDisconnected(camera: CameraDevice) {
@@ -4070,6 +4109,7 @@ class Camera2Engine(private val context: Context) {
         _isCameraReady.value = false
         gyroStabilizationEngine.stop()
         lastStabilizedCrop = null
+        motorolaSwitchEngine.closeBackgroundCamera()
         closeCameraCaptureSession()
         try {
             cameraDevice?.close()
@@ -4125,6 +4165,7 @@ class Camera2Engine(private val context: Context) {
     }
 
     fun release() {
+        motorolaSwitchEngine.release()
         closeCamera()
         stopBackgroundThread()
     }

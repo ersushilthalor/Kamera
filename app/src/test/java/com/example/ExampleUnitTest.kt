@@ -228,4 +228,77 @@ class ExampleUnitTest {
         tempFile.delete()
         assertFalse(tempFile.exists())
     }
+
+    @Test
+    fun testMotorolaInstantSwitchPreferencesIndependence() {
+        val prefs = com.example.camera.data.CameraPreferences(
+            androidx.test.core.app.ApplicationProvider.getApplicationContext()
+        )
+
+        // Test default values
+        assertTrue(prefs.isKeepUltraWideReady)
+        assertFalse(prefs.isShowUltraWidePreview)
+        assertTrue(prefs.isKeepFrontCameraReady)
+        assertFalse(prefs.isShowFrontCameraPreview)
+
+        // Test independent toggling for Ultra-Wide
+        // Ultra-Wide Ready ON + Preview OFF
+        prefs.isKeepUltraWideReady = true
+        prefs.isShowUltraWidePreview = false
+        assertTrue(prefs.isKeepUltraWideReady)
+        assertFalse(prefs.isShowUltraWidePreview)
+
+        // Ultra-Wide Ready ON + Preview ON
+        prefs.isShowUltraWidePreview = true
+        assertTrue(prefs.isKeepUltraWideReady)
+        assertTrue(prefs.isShowUltraWidePreview)
+
+        // Ultra-Wide Ready OFF + Preview ON
+        prefs.isKeepUltraWideReady = false
+        assertFalse(prefs.isKeepUltraWideReady)
+        assertTrue(prefs.isShowUltraWidePreview)
+
+        // Test independent toggling for Front Camera
+        // Front Ready ON + Preview OFF
+        prefs.isKeepFrontCameraReady = true
+        prefs.isShowFrontCameraPreview = false
+        assertTrue(prefs.isKeepFrontCameraReady)
+        assertFalse(prefs.isShowFrontCameraPreview)
+
+        // Front Ready ON + Preview ON
+        prefs.isShowFrontCameraPreview = true
+        assertTrue(prefs.isKeepFrontCameraReady)
+        assertTrue(prefs.isShowFrontCameraPreview)
+
+        // Front Ready OFF
+        prefs.isKeepFrontCameraReady = false
+        assertFalse(prefs.isKeepFrontCameraReady)
+    }
+
+    @Test
+    fun testMotorolaInstantSwitchEngineState() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val engine = com.example.camera.engine.MotorolaInstantSwitchEngine(context)
+
+        assertNotNull(engine.switchState.value)
+
+        // Test independent state toggles via engine
+        engine.setKeepUltraWideReady(true)
+        assertTrue(engine.switchState.value.isKeepUltraWideReady)
+
+        engine.setShowUltraWidePreview(true)
+        assertTrue(engine.switchState.value.isShowUltraWidePreview)
+
+        engine.setShowUltraWidePreview(false)
+        assertFalse(engine.switchState.value.isShowUltraWidePreview)
+        assertTrue(engine.switchState.value.isKeepUltraWideReady)
+
+        engine.setKeepFrontCameraReady(true)
+        assertTrue(engine.switchState.value.isKeepFrontCameraReady)
+
+        engine.setShowFrontCameraPreview(true)
+        assertTrue(engine.switchState.value.isShowFrontCameraPreview)
+
+        engine.release()
+    }
 }

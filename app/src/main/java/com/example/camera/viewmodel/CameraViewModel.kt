@@ -2,6 +2,8 @@ package com.example.camera.viewmodel
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.graphics.SurfaceTexture
+import android.hardware.camera2.CameraCharacteristics
 import android.net.Uri
 import android.util.Log
 import androidx.compose.ui.geometry.Offset
@@ -287,6 +289,68 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _isCustomPipelineEnabled.value = enabled
         preferences.isCustomPipelineEnabled = enabled
         showToast(if (enabled) "Custom Image Pipeline: ON" else "Custom Image Pipeline: OFF")
+    }
+
+    // --- Motorola Instant Camera Switching ---
+    val instantSwitchState: StateFlow<MotorolaInstantSwitchState> = engine.motorolaSwitchEngine.switchState
+
+    fun setKeepUltraWideReady(enabled: Boolean) {
+        engine.motorolaSwitchEngine.setKeepUltraWideReady(enabled)
+        showToast(if (enabled) "Keep Ultra-Wide Ready: ON" else "Keep Ultra-Wide Ready: OFF")
+    }
+
+    fun setShowUltraWidePreview(enabled: Boolean) {
+        engine.motorolaSwitchEngine.setShowUltraWidePreview(enabled)
+        showToast(if (enabled) "Ultra-Wide Little Preview: ON" else "Ultra-Wide Little Preview: OFF")
+    }
+
+    fun setKeepFrontCameraReady(enabled: Boolean) {
+        engine.motorolaSwitchEngine.setKeepFrontCameraReady(enabled)
+        showToast(if (enabled) "Keep Front Camera Ready: ON" else "Keep Front Camera Ready: OFF")
+    }
+
+    fun setShowFrontCameraPreview(enabled: Boolean) {
+        engine.motorolaSwitchEngine.setShowFrontCameraPreview(enabled)
+        showToast(if (enabled) "Front Camera Little Preview: ON" else "Front Camera Little Preview: OFF")
+    }
+
+    fun onUltraWideLittlePreviewSurfaceAvailable(surfaceTexture: SurfaceTexture?) {
+        engine.motorolaSwitchEngine.setUltraWidePreviewSurfaceTexture(surfaceTexture)
+    }
+
+    fun onFrontLittlePreviewSurfaceAvailable(surfaceTexture: SurfaceTexture?) {
+        engine.motorolaSwitchEngine.setFrontPreviewSurfaceTexture(surfaceTexture)
+    }
+
+    fun switchToUltraWideInstant() {
+        val ultraLens = engine.availableLenses.value.firstOrNull { it.lensType == LensType.ULTRAWIDE }
+        if (ultraLens != null) {
+            selectLens(ultraLens)
+        } else {
+            setZoom(0.5f, isPresetTap = true)
+        }
+    }
+
+    fun switchToFrontInstant() {
+        val frontLens = engine.availableLenses.value.firstOrNull {
+            it.facing == CameraCharacteristics.LENS_FACING_FRONT
+        }
+        if (frontLens != null) {
+            selectLens(frontLens)
+        } else {
+            toggleCameraFacing()
+        }
+    }
+
+    fun switchToMainInstant() {
+        val mainLens = engine.availableLenses.value.firstOrNull {
+            it.facing == CameraCharacteristics.LENS_FACING_BACK && it.lensType == LensType.WIDE && !it.isZoomPreset
+        } ?: engine.availableLenses.value.firstOrNull {
+            it.facing == CameraCharacteristics.LENS_FACING_BACK
+        }
+        if (mainLens != null) {
+            selectLens(mainLens)
+        }
     }
 
     fun selectPipelinePreset(preset: com.example.camera.pipeline.model.PipelinePreset) {
