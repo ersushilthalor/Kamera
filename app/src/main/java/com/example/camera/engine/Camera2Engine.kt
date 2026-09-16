@@ -72,6 +72,7 @@ class Camera2Engine(private val context: Context) {
     val customImagePipelineEngine by lazy { com.example.camera.pipeline.engine.CustomImagePipelineEngine(context) }
     val motorolaSwitchEngine by lazy { MotorolaInstantSwitchEngine(context) }
     private var mediaRecorder: MediaRecorder? = null
+    private var activeRecordingSurface: Surface? = null
     private var videoRecordingFileDescriptor: ParcelFileDescriptor? = null
     private var currentRecordingTempFile: File? = null
     private var currentVideoUri: Uri? = null
@@ -545,37 +546,7 @@ class Camera2Engine(private val context: Context) {
                         }
                     }
 
-                    // Android 11+ Zoom Ratio Range (< 1.0f indicates integrated hardware Ultra Wide)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && facing == CameraCharacteristics.LENS_FACING_BACK) {
-                        val zoomRange = chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-                        if (zoomRange != null) {
-                            val minZoom = zoomRange.lower
-                            val maxZoom = zoomRange.upper
 
-                            // If camera supports < 1.0f (e.g. 0.5x, 0.6x), expose Ultra Wide preset
-                            if (minZoom <= 0.9f && lenses.none { it.cameraId == id && it.lensType == LensType.ULTRAWIDE && it.isZoomPreset }) {
-                                val ultraLabel = if (minZoom <= 0.55f) "0.5x" else "%.1fx".format(minZoom)
-                                lenses.add(
-                                    LensInfo(
-                                        cameraId = id,
-                                        facing = facing,
-                                        lensType = LensType.ULTRAWIDE,
-                                        displayName = "$ultraLabel Ultra Wide (Optical Stream)",
-                                        focalLengthMm = primaryFocalMm,
-                                        maxAperture = maxAperture,
-                                        isPhysical = false,
-                                        isHiddenAux = false,
-                                        isZoomPreset = true,
-                                        baseZoomRatio = minZoom,
-                                        fovDegrees = 110f,
-                                        equivalent35mmFocalMm = 14f,
-                                        idTypeDescription = "Optical Ultra-Wide (Zoom $ultraLabel)"
-                                    )
-                                )
-                            }
-
-                        }
-                    }
                 } catch (e: Exception) {
                     Log.w(TAG, "Error inspecting camera $id", e)
                 }
@@ -887,13 +858,6 @@ class Camera2Engine(private val context: Context) {
         preferences.saveLastLens(lens)
         preferences.currentZoom = lens.baseZoomRatio
 
-        // If recording video, prioritize continuity to ensure zero distortion and no video stop:
-        // Adjust optical zoom ratio and crop dynamically on the active recording stream
-        if (_isRecordingVideo.value) {
-            updatePreviewSettings()
-            return
-        }
-
         // If same camera ID and same facing, update optical zoom/crop dynamically without restarting hardware
         if (previousLens?.cameraId == lens.cameraId &&
             previousLens?.facing == lens.facing &&
@@ -906,8 +870,9 @@ class Camera2Engine(private val context: Context) {
         val switchStartNs = System.nanoTime()
 
         // Fast Handover if target camera was warm in background (non-concurrent HAL):
+        // Only use warm handover if NOT recording video, because warm camera session doesn't have recorderSurface
         val warmDevice = motorolaSwitchEngine.handoffBackgroundCamera(lens)
-        if (warmDevice != null) {
+        if (warmDevice != null && !_isRecordingVideo.value) {
             inspectCapabilities(lens.cameraId)
             switchWithWarmCamera(warmDevice, lens, switchStartNs)
             return
@@ -1360,6 +1325,54 @@ class Camera2Engine(private val context: Context) {
     private fun createCameraCaptureSession() {
         val camera = cameraDevice ?: return
         val previewSurf = previewSurface ?: return
+
+        isConfiguringSession = true
+        _isCameraReady.value = false
+
+        // Seamless lens switch during active video recording (Front, Back, Ultra-Wide)
+        val isRecording = _isRecordingVideo.value
+        val recSurface = activeRecordingSurface
+        if (isRecording && recSurface != null && recSurface.isValid) {
+            try {
+                val surfaces = listOf(previewSurf, recSurface)
+                val template = CameraDevice.TEMPLATE_RECORD
+                previewRequestBuilder = camera.createCaptureRequest(template).apply {
+                    addTarget(previewSurf)
+                    addTarget(recSurface)
+                    applyCommonSettings(this)
+                }
+
+                camera.createCaptureSession(
+                    surfaces,
+                    object : CameraCaptureSession.StateCallback() {
+                        override fun onConfigured(session: CameraCaptureSession) {
+                            isConfiguringSession = false
+                            if (cameraDevice == null) return
+                            captureSession = session
+                            try {
+                                previewRequestBuilder?.let {
+                                    session.setRepeatingRequest(it.build(), captureCallback, backgroundHandler)
+                                }
+                                _isCameraReady.value = true
+                                Log.i(TAG, "Seamless lens switch during active recording session completed successfully")
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed repeating record request after seamless lens switch", e)
+                            }
+                        }
+
+                        override fun onConfigureFailed(session: CameraCaptureSession) {
+                            isConfiguringSession = false
+                            Log.e(TAG, "Failed to configure video recording session after lens switch")
+                            _isCameraReady.value = false
+                        }
+                    },
+                    backgroundHandler
+                )
+                return
+            } catch (e: Exception) {
+                Log.e(TAG, "Error configuring video recording capture session during lens switch", e)
+            }
+        }
 
         val activeLens = _selectedLens.value
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
@@ -1945,7 +1958,12 @@ class Camera2Engine(private val context: Context) {
         if (currentLens.facing == CameraCharacteristics.LENS_FACING_FRONT) {
             if (isPresetTap && (clampedZoom < 0.95f || clampedZoom in 0.95f..1.1f)) {
                 val backLenses = _availableLenses.value.filter { it.facing == CameraCharacteristics.LENS_FACING_BACK }
-                val backTarget = backLenses.firstOrNull { if (clampedZoom < 0.95f) it.lensType == LensType.ULTRAWIDE else it.lensType == LensType.WIDE }
+                val backTarget = if (clampedZoom < 0.95f) {
+                    backLenses.firstOrNull { it.lensType == LensType.ULTRAWIDE && it.isPhysical }
+                } else {
+                    backLenses.firstOrNull { it.lensType == LensType.WIDE && !it.isZoomPreset }
+                        ?: backLenses.firstOrNull { it.lensType == LensType.WIDE }
+                }
                 if (backTarget != null) {
                     selectLens(backTarget)
                     return
@@ -1959,9 +1977,8 @@ class Camera2Engine(private val context: Context) {
         val backLenses = _availableLenses.value.filter { it.facing == CameraCharacteristics.LENS_FACING_BACK }
         val targetLens: LensInfo? = when {
             clampedZoom < 0.9f -> {
-                // Target is 0.5x Ultra Wide
+                // Target is 0.5x Ultra Wide - only if real physical hardware is present
                 backLenses.firstOrNull { it.lensType == LensType.ULTRAWIDE && it.isPhysical }
-                    ?: backLenses.firstOrNull { it.lensType == LensType.ULTRAWIDE }
             }
             clampedZoom in 0.9f..1.95f -> {
                 // Target is 1x Main Wide
@@ -3359,6 +3376,7 @@ class Camera2Engine(private val context: Context) {
                     bitDepth = if (is10BitRequested || cinemaCodec == CinemaCodec.PRORES) LogBitDepth.BIT_10 else LogBitDepth.BIT_8,
                     isAudioEnabled = isAudioEnabled
                 )
+                activeRecordingSurface = recorderSurface
                 val previewSurf = previewSurface ?: return
                 val surfaces = listOf(previewSurf, recorderSurface)
 
@@ -3534,6 +3552,7 @@ class Camera2Engine(private val context: Context) {
             }
 
             val recorderSurface = mediaRecorder!!.surface
+            activeRecordingSurface = recorderSurface
             val previewSurf = previewSurface ?: return
 
             val surfaces = listOf(previewSurf, recorderSurface)
@@ -3623,6 +3642,7 @@ class Camera2Engine(private val context: Context) {
      * Stop Video Recording
      */
     fun stopVideoRecording() {
+        activeRecordingSurface = null
         if (!_isRecordingVideo.value && !isSoftwareCinemaRecording) return
 
         try {

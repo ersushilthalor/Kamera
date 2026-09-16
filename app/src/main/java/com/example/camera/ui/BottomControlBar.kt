@@ -335,7 +335,7 @@ fun BottomControlBar(
                                     .clip(CircleShape)
                                     .background(Color(0xB21E1E24))
                                     .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
-                                    .clickable(enabled = !isRecordingVideo) { onFlipCameraClick() }
+                                    .clickable { onFlipCameraClick() }
                                     .testTag("flip_camera_button"),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -704,11 +704,14 @@ fun MasterZoomCapsule(
     modifier: Modifier = Modifier
 ) {
     val isFrontCamera = selectedLens?.facing == CameraCharacteristics.LENS_FACING_FRONT
-    val presets = remember(isFrontCamera) {
+    val hasRealUltraWide = remember(displayedLenses) {
+        displayedLenses.any { it.lensType == LensType.ULTRAWIDE && it.isPhysical }
+    }
+    val presets = remember(isFrontCamera, hasRealUltraWide) {
         if (isFrontCamera) {
-            listOf(1.0f)
+            if (hasRealUltraWide) listOf(0.5f, 1.0f) else listOf(1.0f)
         } else {
-            listOf(0.5f, 1.0f, 2.0f, 3.0f, 5.0f, 10.0f)
+            if (hasRealUltraWide) listOf(0.5f, 1.0f, 2.0f, 3.0f, 5.0f, 10.0f) else listOf(1.0f, 2.0f, 3.0f, 5.0f, 10.0f)
         }
     }
 
@@ -719,7 +722,7 @@ fun MasterZoomCapsule(
             .clip(RoundedCornerShape(22.dp))
             .background(Color(0xD9141418))
             .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(22.dp))
-            .pointerInput(currentZoom) {
+            .pointerInput(currentZoom, hasRealUltraWide) {
                 detectHorizontalDragGestures(
                     onDragStart = { isDragging = true },
                     onDragEnd = { isDragging = false },
@@ -727,7 +730,8 @@ fun MasterZoomCapsule(
                     onHorizontalDrag = { change, dragAmount ->
                         change.consume()
                         val sensitivity = 0.022f
-                        val newZoom = (currentZoom + dragAmount * sensitivity).coerceIn(0.5f, 10.0f)
+                        val minAllowableZoom = if (hasRealUltraWide) 0.5f else 1.0f
+                        val newZoom = (currentZoom + dragAmount * sensitivity).coerceIn(minAllowableZoom, 10.0f)
                         val rounded = (newZoom * 10).roundToInt() / 10f
                         onZoomChange(rounded)
                     }
@@ -761,12 +765,12 @@ fun MasterZoomCapsule(
                     label
                 }
 
-                // Physical lens mapping
+                // Physical lens mapping (Real hardware lenses only)
                 val targetLens = when (preset) {
                     0.5f -> displayedLenses.firstOrNull { it.lensType == LensType.ULTRAWIDE && it.isPhysical }
-                        ?: displayedLenses.firstOrNull { it.lensType == LensType.ULTRAWIDE }
-                    1.0f -> displayedLenses.firstOrNull { it.lensType == LensType.WIDE && it.isPhysical && !it.isZoomPreset }
-                        ?: displayedLenses.firstOrNull { it.lensType == LensType.WIDE && !it.isZoomPreset }
+                    1.0f -> displayedLenses.firstOrNull { it.facing == CameraCharacteristics.LENS_FACING_BACK && it.lensType == LensType.WIDE && it.isPhysical && !it.isZoomPreset }
+                        ?: displayedLenses.firstOrNull { it.facing == CameraCharacteristics.LENS_FACING_BACK && it.lensType == LensType.WIDE && !it.isZoomPreset }
+                        ?: displayedLenses.firstOrNull { it.facing == CameraCharacteristics.LENS_FACING_BACK }
                     2.0f -> displayedLenses.firstOrNull { (it.lensType == LensType.TELEPHOTO || it.lensType == LensType.TELEPHOTO_3X) && it.isPhysical }
                         ?: displayedLenses.firstOrNull { it.lensType == LensType.TELEPHOTO || it.lensType == LensType.TELEPHOTO_3X }
                     3.0f -> displayedLenses.firstOrNull { it.lensType == LensType.TELEPHOTO_3X && it.isPhysical }
@@ -791,20 +795,19 @@ fun MasterZoomCapsule(
                             if (targetLens != null) {
                                 onLensSelected(targetLens)
                             } else if (preset == 1.0f) {
-                                val mainLens = displayedLenses.firstOrNull { it.lensType == LensType.WIDE }
+                                val mainLens = displayedLenses.firstOrNull { it.facing == CameraCharacteristics.LENS_FACING_BACK && it.lensType == LensType.WIDE && !it.isZoomPreset }
+                                    ?: displayedLenses.firstOrNull { it.facing == CameraCharacteristics.LENS_FACING_BACK }
                                 if (mainLens != null && selectedLens?.id != mainLens.id) {
                                     onLensSelected(mainLens)
                                 } else {
                                     onZoomPresetTap(1.0f)
                                 }
                             } else if (preset == 0.5f) {
-                                val ultraLens = displayedLenses.firstOrNull { it.lensType == LensType.ULTRAWIDE }
+                                val ultraLens = displayedLenses.firstOrNull { it.lensType == LensType.ULTRAWIDE && it.isPhysical }
                                 if (ultraLens != null) {
                                     onLensSelected(ultraLens)
-                                } else if (capabilities.minZoom <= 0.6f) {
-                                    onZoomPresetTap(0.5f)
                                 } else {
-                                    onShowToast("0.5x Ultra-Wide lens is not available on this device")
+                                    onShowToast("Real Ultra-Wide lens is not available on this device")
                                 }
                             } else {
                                 if (preset <= capabilities.maxZoom) {

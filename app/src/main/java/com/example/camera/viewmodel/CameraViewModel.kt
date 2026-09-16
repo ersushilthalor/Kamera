@@ -323,11 +323,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun switchToUltraWideInstant() {
-        val ultraLens = engine.availableLenses.value.firstOrNull { it.lensType == LensType.ULTRAWIDE }
+        val ultraLens = engine.availableLenses.value.firstOrNull { it.lensType == LensType.ULTRAWIDE && it.isPhysical }
         if (ultraLens != null) {
             selectLens(ultraLens)
         } else {
-            setZoom(0.5f, isPresetTap = true)
+            showToast("Real Ultra-Wide lens is not available on this device")
         }
     }
 
@@ -1040,7 +1040,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setZoom(zoom: Float, isPresetTap: Boolean = false) {
-        val clamped = zoom.coerceIn(0.5f, 10.0f)
+        val hasRealUltraWide = engine.availableLenses.value.any { it.lensType == LensType.ULTRAWIDE && it.isPhysical }
+        val minZoom = if (hasRealUltraWide) 0.5f else 1.0f
+        val clamped = zoom.coerceIn(minZoom, 10.0f)
         _currentZoom.value = clamped
         preferences.currentZoom = clamped
         preferences.setModeZoom(_cameraMode.value, clamped)
