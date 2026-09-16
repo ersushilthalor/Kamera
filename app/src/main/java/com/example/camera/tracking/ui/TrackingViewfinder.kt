@@ -276,53 +276,38 @@ private fun DrawScope.drawActiveTrackingReticle(
 
     val reticleColor = when (status) {
         TrackingStatus.TRACKING_LOCKED -> Color(0xFF00E5FF) // Electric Cyan
-        TrackingStatus.OCCLUDED_PREDICTING -> Color(0xFFFFB300) // Amber Prediction
-        TrackingStatus.LOST -> Color(0xFFFF5252) // Red Alert
+        TrackingStatus.OCCLUDED_PREDICTING -> Color(0xFFFFD54F) // Subtle Amber
+        TrackingStatus.LOST -> Color(0xFFFF8A80) // Soft Red
         else -> Color(0xFF38BDF8)
     }
 
-    val cornerLen = (w.coerceAtMost(h) * 0.28f).coerceIn(16f, 42f)
-    val strokeW = 4f
+    val cornerLen = (w.coerceAtMost(h) * 0.20f).coerceIn(12f, 24f)
+    val strokeW = 2f
 
     // Top-Left Corner
-    drawLine(reticleColor, Offset(x, y), Offset(x + cornerLen, y), strokeWidth = strokeW)
-    drawLine(reticleColor, Offset(x, y), Offset(x, y + cornerLen), strokeWidth = strokeW)
+    drawLine(reticleColor.copy(alpha = 0.85f), Offset(x, y), Offset(x + cornerLen, y), strokeWidth = strokeW)
+    drawLine(reticleColor.copy(alpha = 0.85f), Offset(x, y), Offset(x, y + cornerLen), strokeWidth = strokeW)
 
     // Top-Right Corner
-    drawLine(reticleColor, Offset(x + w, y), Offset(x + w - cornerLen, y), strokeWidth = strokeW)
-    drawLine(reticleColor, Offset(x + w, y), Offset(x + w, y + cornerLen), strokeWidth = strokeW)
+    drawLine(reticleColor.copy(alpha = 0.85f), Offset(x + w, y), Offset(x + w - cornerLen, y), strokeWidth = strokeW)
+    drawLine(reticleColor.copy(alpha = 0.85f), Offset(x + w, y), Offset(x + w, y + cornerLen), strokeWidth = strokeW)
 
     // Bottom-Left Corner
-    drawLine(reticleColor, Offset(x, y + h), Offset(x + cornerLen, y + h), strokeWidth = strokeW)
-    drawLine(reticleColor, Offset(x, y + h), Offset(x, y + h - cornerLen), strokeWidth = strokeW)
+    drawLine(reticleColor.copy(alpha = 0.85f), Offset(x, y + h), Offset(x + cornerLen, y + h), strokeWidth = strokeW)
+    drawLine(reticleColor.copy(alpha = 0.85f), Offset(x, y + h), Offset(x, y + h - cornerLen), strokeWidth = strokeW)
 
     // Bottom-Right Corner
-    drawLine(reticleColor, Offset(x + w, y + h), Offset(x + w - cornerLen, y + h), strokeWidth = strokeW)
-    drawLine(reticleColor, Offset(x + w, y + h), Offset(x + w, y + h - cornerLen), strokeWidth = strokeW)
+    drawLine(reticleColor.copy(alpha = 0.85f), Offset(x + w, y + h), Offset(x + w - cornerLen, y + h), strokeWidth = strokeW)
+    drawLine(reticleColor.copy(alpha = 0.85f), Offset(x + w, y + h), Offset(x + w, y + h - cornerLen), strokeWidth = strokeW)
 
-    // Center Crosshair
+    // Subtle Center Dot
     val cx = x + w / 2f
     val cy = y + h / 2f
-    val crosshairLen = 14f
-    drawLine(reticleColor.copy(alpha = 0.8f), Offset(cx - crosshairLen, cy), Offset(cx + crosshairLen, cy), strokeWidth = 2f)
-    drawLine(reticleColor.copy(alpha = 0.8f), Offset(cx, cy - crosshairLen), Offset(cx, cy + crosshairLen), strokeWidth = 2f)
-
-    // Motion vector arrow if moving
-    if (Math.abs(subject.velocityX) > 0.05f || Math.abs(subject.velocityY) > 0.05f) {
-        val arrowEndX = cx + subject.velocityX * 180f
-        val arrowEndY = cy + subject.velocityY * 180f
-        drawLine(
-            color = Color(0xFF00FFCC).copy(alpha = 0.7f),
-            start = Offset(cx, cy),
-            end = Offset(arrowEndX, arrowEndY),
-            strokeWidth = 2.5f
-        )
-        drawCircle(
-            color = Color(0xFF00FFCC),
-            radius = 4f,
-            center = Offset(arrowEndX, arrowEndY)
-        )
-    }
+    drawCircle(
+        color = reticleColor.copy(alpha = 0.7f),
+        radius = 2.5f,
+        center = Offset(cx, cy)
+    )
 }
 
 private fun DrawScope.drawBoundaryIndicators(

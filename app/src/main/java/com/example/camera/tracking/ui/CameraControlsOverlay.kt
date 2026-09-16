@@ -114,69 +114,47 @@ private fun TopFixedControlsBar(
             .fillMaxWidth()
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(Color.Black.copy(alpha = 0.85f), Color.Transparent)
+                    colors = listOf(Color.Black.copy(alpha = 0.7f), Color.Transparent)
                 )
             )
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
-        // Auto-switch notification banner
-        AnimatedVisibility(
-            visible = uiState.trackingResolutionNotice != null,
-            enter = fadeIn(),
-            exit = fadeOut()
-        ) {
-            uiState.trackingResolutionNotice?.let { notice ->
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFF0F172A).copy(alpha = 0.95f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp)
-                        .clickable { onDismissResolutionNotice() }
-                        .testTag("tracking_resolution_notice")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = notice,
-                            fontSize = 11.sp,
-                            color = Color(0xFFFCD34D),
-                            fontWeight = FontWeight.Medium
-                        )
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Dismiss",
-                            tint = Color(0xFFFCD34D),
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // Upper row: Back, Ultra AI Status Indicator, Tracking Resolution, FPS, Settings & Camera Flip
+        // Upper row: Back button on left, clean icon buttons on right
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Back Button to exit AI tracking mode back to regular camera
+            IconButton(
+                onClick = onBackToMainCamera,
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(Color(0x44000000))
+                    .testTag("back_to_camera_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ArrowBack,
+                    contentDescription = "Exit AI Tracking",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // Clean icon actions: Settings Gear and Camera Flip
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Back Button to exit AI tracking mode back to regular camera
                 IconButton(
-                    onClick = onBackToMainCamera,
+                    onClick = onOpenSettings,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(38.dp)
                         .clip(CircleShape)
-                        .background(Color(0x44334155))
-                        .testTag("back_to_camera_button")
+                        .background(Color(0x44000000))
+                        .testTag("settings_button")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.ArrowBack,
-                        contentDescription = "Exit AI Tracking",
+                        imageVector = Icons.Default.Tune,
+                        contentDescription = "Settings",
                         tint = Color.White,
                         modifier = Modifier.size(20.dp)
                     )
@@ -184,115 +162,12 @@ private fun TopFixedControlsBar(
 
                 Spacer(modifier = Modifier.width(8.dp))
 
-                // Ultra AI Tracker Status Badge
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Color(0xFF0F172A).copy(alpha = 0.85f))
-                        .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.4f), RoundedCornerShape(20.dp))
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                        .testTag("ultra_ai_indicator")
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(if (uiState.trackingStatus == TrackingStatus.TRACKING_LOCKED) Color(0xFF00E5FF) else Color(0xFF10B981))
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "AI TRACKING",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF00E5FF).copy(alpha = 0.18f)
-                    ) {
-                        Text(
-                            text = "3× CROP",
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF00E5FF),
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-            }
-
-            // Top action buttons: AI Resolution, FPS, Settings Gear, Camera Flip
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // AI Tracking Resolution Badge (720p / 1080p toggle)
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF1E293B),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.6f)),
-                    modifier = Modifier
-                        .clickable { onToggleTrackingResolution() }
-                        .testTag("tracking_res_quick_toggle")
-                ) {
-                    Text(
-                        text = "AI ${uiState.trackingResolution.label}",
-                        color = Color(0xFF00E5FF),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(6.dp))
-
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF1E293B),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.5f)),
-                    modifier = Modifier
-                        .clickable {
-                            val options = TrackingFpsOption.values()
-                            val nextIdx = (options.indexOf(uiState.selectedFpsOption) + 1) % options.size
-                            onFpsOptionChanged(options[nextIdx])
-                        }
-                        .testTag("fps_toggle_button")
-                ) {
-                    Text(
-                        text = if (uiState.fps > 0) "${uiState.fps} FPS" else uiState.selectedFpsOption.label,
-                        color = Color(0xFF38BDF8),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(6.dp))
-
-                // Settings Gear Button
-                IconButton(
-                    onClick = onOpenSettings,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(Color(0x44334155))
-                        .testTag("settings_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Tune,
-                        contentDescription = "Settings",
-                        tint = Color(0xFF38BDF8),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(6.dp))
-
                 IconButton(
                     onClick = onFlipCamera,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(38.dp)
                         .clip(CircleShape)
-                        .background(Color(0x44334155))
+                        .background(Color(0x44000000))
                         .testTag("flip_camera_button")
                 ) {
                     Icon(
@@ -300,147 +175,6 @@ private fun TopFixedControlsBar(
                         contentDescription = "Switch Camera",
                         tint = Color.White,
                         modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-        }
-
-        // Quick feature bar: Aspect Ratio, Gimbal, 5s Pan, Tracking Speed
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Quick Aspect Ratio button
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF0369A1))
-                    .clickable { onToggleAspectRatio() }
-                    .padding(horizontal = 9.dp, vertical = 5.dp)
-                    .testTag("quick_aspect_btn")
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.AspectRatio,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = uiState.aspectRatio.label,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                }
-            }
-
-            // Quick Digital Gimbal toggle
-            val isGimbalOn = uiState.isGimbalEnabled
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (isGimbalOn) Color(0xFF059669) else Color(0x44334155))
-                .border(
-                    1.dp,
-                    if (isGimbalOn) Color(0xFF34D399) else Color.Transparent,
-                    RoundedCornerShape(12.dp)
-                )
-                    .clickable { onToggleGimbal(!isGimbalOn) }
-                    .padding(horizontal = 9.dp, vertical = 5.dp)
-                    .testTag("quick_gimbal_btn")
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Security,
-                        contentDescription = null,
-                        tint = if (isGimbalOn) Color.White else Color(0xFF94A3B8),
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = if (isGimbalOn) "GIMBAL EIS ON" else "GIMBAL EIS",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isGimbalOn) Color.White else Color(0xFF94A3B8)
-                    )
-                }
-            }
-
-            // Quick 5s Cinematic Pan button
-            val isPanning = uiState.isCinematicPanActive
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (isPanning) Color(0xFF4F46E5) else Color(0x44334155))
-                    .clickable {
-                        if (isPanning) onStopCinematicPan() else onStartCinematicPan(5.0f)
-                    }
-                    .padding(horizontal = 9.dp, vertical = 5.dp)
-                    .testTag("quick_pan_btn")
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Movie,
-                        contentDescription = null,
-                        tint = if (isPanning) Color(0xFFA5B4FC) else Color(0xFFCBD5E1),
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = if (isPanning) "PANNING ${(uiState.cinematicPanProgress * 100).toInt()}%" else "5s PAN",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                }
-            }
-
-            // Tracking Speed badge (opens settings)
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0x44334155))
-                    .clickable { onOpenSettings() }
-                    .padding(horizontal = 8.dp, vertical = 5.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Speed,
-                        contentDescription = null,
-                        tint = Color(0xFF38BDF8),
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "${String.format("%.1f", uiState.trackingIntensity)}× SPD",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color(0xFFE2E8F0)
-                    )
-                }
-            }
-
-            // Adaptive Learned Subjects Badge
-            if (uiState.learnedSubjectsCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF0F766E).copy(alpha = 0.8f))
-                        .border(1.dp, Color(0xFF2DD4BF), RoundedCornerShape(12.dp))
-                        .clickable { onOpenSettings() }
-                        .padding(horizontal = 8.dp, vertical = 5.dp)
-                ) {
-                    Text(
-                        text = "🧠 ${uiState.learnedSubjectsCount} LEARNED",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFFCCFBF1)
                     )
                 }
             }
@@ -460,129 +194,29 @@ private fun CenterTrackingHud(
             .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Cinematic Pan Banner
-        if (uiState.isCinematicPanActive) {
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = Color(0xEE312E81),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFA5B4FC)),
-                modifier = Modifier.padding(bottom = 8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "CINEMATIC PAN (${uiState.cinematicPanDurationSec.toInt()}s) • ${(uiState.cinematicPanProgress * 100).toInt()}%",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .size(20.dp)
-                            .clip(CircleShape)
-                            .background(Color(0x55EF4444))
-                            .clickable { onStopCinematicPan() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Stop pan",
-                            tint = Color.White,
-                            modifier = Modifier.size(12.dp)
-                        )
-                    }
+        // Keep it extremely clean and minimal.
+        // No text on the viewfinder. Only one small AI Subject Tracking icon.
+        val isLocked = uiState.trackingStatus == TrackingStatus.TRACKING_LOCKED
+        Surface(
+            shape = CircleShape,
+            color = if (isLocked) Color(0xDD0B192C) else Color(0x55000000),
+            border = androidx.compose.foundation.BorderStroke(
+                width = 1.dp,
+                color = if (isLocked) Color(0xFF00E5FF).copy(alpha = 0.85f) else Color.White.copy(alpha = 0.35f)
+            ),
+            modifier = Modifier
+                .size(36.dp)
+                .clickable {
+                    if (isLocked) onUnlockTracking()
                 }
-            }
-        }
-
-        // Notification Pill
-        AnimatedVisibility(
-            visible = true,
-            enter = fadeIn(),
-            exit = fadeOut()
+                .testTag("ai_tracking_status_icon")
         ) {
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = when (uiState.trackingStatus) {
-                    TrackingStatus.TRACKING_LOCKED -> Color(0xEE0B192C)
-                    TrackingStatus.OCCLUDED_PREDICTING -> Color(0xEE2A1B00)
-                    TrackingStatus.LOST -> Color(0xEE2D0C0C)
-                    else -> Color(0xCC0F172A)
-                },
-                border = androidx.compose.foundation.BorderStroke(
-                    width = 1.dp,
-                    color = when (uiState.trackingStatus) {
-                        TrackingStatus.TRACKING_LOCKED -> Color(0xFF00E5FF)
-                        TrackingStatus.OCCLUDED_PREDICTING -> Color(0xFFFFB300)
-                        TrackingStatus.LOST -> Color(0xFFFF5252)
-                        else -> Color(0x3394A3B8)
-                    }
-                )
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val statusText = when (uiState.trackingStatus) {
-                        TrackingStatus.TRACKING_LOCKED -> {
-                            val zoomStr = String.format("%.1f", uiState.currentZoom)
-                            "AI LOCKED ${zoomStr}× • ${uiState.activeSubject?.label ?: "Subject"}"
-                        }
-                        TrackingStatus.OCCLUDED_PREDICTING -> "OCCLUDED • HOLDING LOCK"
-                        TrackingStatus.LOST -> "SEARCHING • TAP TO LOCK"
-                        else -> "TAP A SUBJECT TO LOCK TRACKING"
-                    }
-                    Text(
-                        text = statusText,
-                        color = when (uiState.trackingStatus) {
-                            TrackingStatus.TRACKING_LOCKED -> Color(0xFF00E5FF)
-                            TrackingStatus.OCCLUDED_PREDICTING -> Color(0xFFFFD54F)
-                            TrackingStatus.LOST -> Color(0xFFFF8A80)
-                            else -> Color(0xFFE2E8F0)
-                        },
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    if (uiState.trackingStatus != TrackingStatus.IDLE) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Box(
-                            modifier = Modifier
-                                .size(22.dp)
-                                .clip(CircleShape)
-                                .background(Color(0x33FFFFFF))
-                                .clickable { onUnlockTracking() }
-                                .testTag("unlock_tracking_button"),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Unlock tracking",
-                                tint = Color.White,
-                                modifier = Modifier.size(14.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // Gimbal Active Badge
-        if (uiState.isGimbalEnabled) {
-            Spacer(modifier = Modifier.height(4.dp))
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = Color(0x99064E3B)
-            ) {
-                Text(
-                    text = "✓ EIS GIMBAL STABILIZED",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF6EE7B7),
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Default.CenterFocusStrong,
+                    contentDescription = "AI Subject Tracking",
+                    tint = if (isLocked) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.85f),
+                    modifier = Modifier.size(19.dp)
                 )
             }
         }

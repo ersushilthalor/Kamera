@@ -15,6 +15,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -48,6 +50,10 @@ import com.example.camera.model.CameraMode
 import com.example.camera.model.CinematicLut
 import com.example.camera.model.GridType
 import com.example.camera.model.PhotoFilter
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -74,6 +80,9 @@ fun Viewfinder(
     modifier: Modifier = Modifier
 ) {
     var currentScale by remember { mutableFloatStateOf(1.0f) }
+    var isZoomBarVisible by remember { mutableStateOf(false) }
+    var zoomHideJob by remember { mutableStateOf<Job?>(null) }
+    val coroutineScope = rememberCoroutineScope()
 
     BoxWithConstraints(
         modifier = modifier
@@ -114,9 +123,27 @@ fun Viewfinder(
                 modifier = Modifier
                     .size(width = targetWidth, height = targetHeight)
                     .pointerInput(Unit) {
-                        detectTransformGestures { _, _, zoom, _ ->
-                            currentScale = (currentScale * zoom).coerceIn(1.0f, 8.0f)
-                            onZoomChange(currentScale)
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            var changed = false
+                            if (zoom != 1f) {
+                                currentScale = (currentScale * zoom).coerceIn(0.5f, 10.0f)
+                                changed = true
+                            }
+                            // Horizontal swipe: Right to Left (pan.x < 0) zooms in; Left to Right (pan.x > 0) zooms out
+                            if (abs(pan.x) > abs(pan.y) && abs(pan.x) > 1.5f) {
+                                val zoomDelta = -pan.x / 140f
+                                currentScale = (currentScale + zoomDelta).coerceIn(0.5f, 10.0f)
+                                changed = true
+                            }
+                            if (changed) {
+                                onZoomChange(currentScale)
+                                isZoomBarVisible = true
+                                zoomHideJob?.cancel()
+                                zoomHideJob = coroutineScope.launch {
+                                    delay(1000)
+                                    isZoomBarVisible = false
+                                }
+                            }
                         }
                     }
                     .pointerInput(Unit) {
@@ -217,9 +244,55 @@ fun Viewfinder(
                             isAfLocked = isAfLocked,
                             exposureCompensation = currentExposureCompensation,
                             onExposureChange = onExposureCompensationChange,
-                            onLockClick = onToggleLock,
-                            showExposureSlider = cameraMode != CameraMode.PHOTO
+                            onLockClick = onToggleLock
                         )
+                    }
+                }
+
+                // Minimal Zoom Bar HUD overlay (auto-hides after 1s of inactivity)
+                AnimatedVisibility(
+                    visible = isZoomBarVisible,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 76.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color(0xDD111827),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+                        modifier = Modifier.testTag("viewfinder_minimal_zoom_bar")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = String.format(java.util.Locale.US, "%.1f×", currentScale),
+                                color = Color(0xFFFFD54F),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            // Sleek minimal slider track indicator
+                            Box(
+                                modifier = Modifier
+                                    .width(80.dp)
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(Color.White.copy(alpha = 0.25f))
+                            ) {
+                                val normProgress = ((currentScale - 0.5f) / (10.0f - 0.5f)).coerceIn(0f, 1f)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .fillMaxWidth(normProgress)
+                                        .clip(RoundedCornerShape(2.dp))
+                                        .background(Color(0xFFFFD54F))
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -235,7 +308,6 @@ fun FocusRingIndicator(
     exposureCompensation: Int = 0,
     onExposureChange: (Int) -> Unit = {},
     onLockClick: () -> Unit = {},
-    showExposureSlider: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "focusPulse")
@@ -311,49 +383,6 @@ fun FocusRingIndicator(
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold
                     )
-                }
-            }
-        }
-
-        // Stock-Camera Sun Exposure Slider to the right of the focus ring (omitted in Photo mode)
-        if (showExposureSlider) {
-            var dragAccumulator by remember { mutableFloatStateOf(0f) }
-            Box(
-                modifier = Modifier
-                    .offset(x = offsetX + 78.dp, y = offsetY + 12.dp)
-                    .size(width = 30.dp, height = 48.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color.Black.copy(alpha = 0.5f))
-                    .pointerInput(exposureCompensation) {
-                        detectTransformGestures { _, pan, _, _ ->
-                            dragAccumulator -= pan.y
-                            if (dragAccumulator > 25f) {
-                                onExposureChange((exposureCompensation + 1).coerceAtMost(4))
-                                dragAccumulator = 0f
-                            } else if (dragAccumulator < -25f) {
-                                onExposureChange((exposureCompensation - 1).coerceAtLeast(-4))
-                                dragAccumulator = 0f
-                            }
-                        }
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Text(
-                        text = "☀️",
-                        fontSize = 14.sp
-                    )
-                    if (exposureCompensation != 0) {
-                        Text(
-                            text = if (exposureCompensation > 0) "+$exposureCompensation" else "$exposureCompensation",
-                            color = Color(0xFFFFD54F),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
                 }
             }
         }

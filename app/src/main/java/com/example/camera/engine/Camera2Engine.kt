@@ -1763,11 +1763,15 @@ class Camera2Engine(private val context: Context) {
                 )
             }
         } else {
-            // In Still Photo / Night / Portrait: engage OIS for razor sharp multi-frame images
+            // In Still Photo / Night / Portrait: respect OIS toggle state
             if (caps.supportsOis) {
                 builder.set(
                     CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
-                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
+                    if (hybridConfig.isOisPreferred) {
+                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
+                    } else {
+                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
+                    }
                 )
             }
             builder.set(
@@ -1976,22 +1980,23 @@ class Camera2Engine(private val context: Context) {
         // Identify target hardware lens for current zoom level:
         val backLenses = _availableLenses.value.filter { it.facing == CameraCharacteristics.LENS_FACING_BACK }
         val targetLens: LensInfo? = when {
-            clampedZoom < 0.9f -> {
-                // Target is 0.5x Ultra Wide - only if real physical hardware is present
+            clampedZoom < 1.0f -> {
+                // Target is 0.5x Ultra Wide (< 1.0x) - physical hardware lens
                 backLenses.firstOrNull { it.lensType == LensType.ULTRAWIDE && it.isPhysical }
+                    ?: backLenses.firstOrNull { it.lensType == LensType.ULTRAWIDE }
             }
-            clampedZoom in 0.9f..1.95f -> {
+            clampedZoom in 1.0f..<2.0f -> {
                 // Target is 1x Main Wide
                 backLenses.firstOrNull { it.lensType == LensType.WIDE && !it.isZoomPreset }
                     ?: backLenses.firstOrNull { it.lensType == LensType.WIDE }
             }
-            clampedZoom >= 2.95f -> {
+            clampedZoom >= 3.0f -> {
                 // Target is 3x Telephoto if hardware present, else 2x, else 1x
                 backLenses.firstOrNull { it.lensType == LensType.TELEPHOTO_3X && it.isPhysical }
                     ?: backLenses.firstOrNull { it.lensType == LensType.TELEPHOTO && it.isPhysical }
                     ?: backLenses.firstOrNull { it.lensType == LensType.WIDE && !it.isZoomPreset }
             }
-            clampedZoom >= 1.95f -> {
+            clampedZoom >= 2.0f -> {
                 // Target is 2x Telephoto if hardware present, else 1x
                 backLenses.firstOrNull { it.lensType == LensType.TELEPHOTO && it.isPhysical }
                     ?: backLenses.firstOrNull { it.lensType == LensType.WIDE && !it.isZoomPreset }
@@ -2000,7 +2005,6 @@ class Camera2Engine(private val context: Context) {
         }
 
         if (targetLens != null && targetLens != currentLens) {
-            _selectedLens.value = targetLens
             val isDiffHardware = targetLens.cameraId != currentLens.cameraId ||
                     targetLens.physicalCameraId != currentLens.physicalCameraId
             if (isDiffHardware) {
@@ -2010,18 +2014,17 @@ class Camera2Engine(private val context: Context) {
                     selectLens(targetLens)
                 } else {
                     // Continuous scrubbing: apply optical/digital zoom immediately to active preview,
-                    // and switch physical camera ID once scrubbing settles (160ms) to prevent HAL freeze!
+                    // and switch physical camera ID once scrubbing settles (120ms) to prevent HAL freeze!
                     updatePreviewSettings()
                     zoomDebounceJob = engineScope.launch {
-                        delay(160)
-                        val activeNow = _selectedLens.value
-                        if (targetLens.cameraId != activeNow?.cameraId || targetLens.physicalCameraId != activeNow?.physicalCameraId) {
+                        delay(120)
+                        if (targetLens != _selectedLens.value) {
                             selectLens(targetLens)
                         }
                     }
                 }
             } else {
-                // Same hardware camera: optical/digital zoom applied immediately without camera restart
+                _selectedLens.value = targetLens
                 updatePreviewSettings()
             }
         } else {
@@ -2097,8 +2100,8 @@ class Camera2Engine(private val context: Context) {
             val targetSensorY = sensorRect.top + zoomedOffsetY + normSensorY * zoomedH
 
             // 5. Metering Rectangle (scaled proportionally to active sensor array)
-            val boxW = (sensorW * 0.08f).toInt().coerceAtLeast(120)
-            val boxH = (sensorH * 0.08f).toInt().coerceAtLeast(120)
+            val boxW = (sensorW * 0.12f).toInt().coerceIn(180, 450)
+            val boxH = (sensorH * 0.12f).toInt().coerceIn(180, 450)
 
             val left = (targetSensorX - boxW / 2).toInt().coerceIn(sensorRect.left, sensorRect.right - 10)
             val right = (targetSensorX + boxW / 2).toInt().coerceIn(left + 10, sensorRect.right)
@@ -2130,6 +2133,15 @@ class Camera2Engine(private val context: Context) {
                     builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
                     if (isLock) {
                         builder.set(CaptureRequest.CONTROL_AE_LOCK, true)
+                        builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+                    } else {
+                        // Transition to smooth continuous AF holding the tapped region to prevent hunting
+                        val continuousMode = if (currentMode == CameraMode.VIDEO || currentMode == CameraMode.CINEMA || currentMode == CameraMode.DOLLY_ZOOM) {
+                            CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+                        } else {
+                            CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+                        }
+                        builder.set(CaptureRequest.CONTROL_AF_MODE, continuousMode)
                     }
                     session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
                 }

@@ -1194,6 +1194,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun triggerNightCapture() {
         if (engine.isCapturing.value) return
+        com.example.camera.sound.CameraSoundManager.playShutter()
         val config = _nightConfig.value
         engine.takeNightPhoto(
             durationSeconds = config.durationSeconds,
@@ -1299,6 +1300,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (is50M) {
             showToast("Processing 50MP Computational photo...")
         }
+        com.example.camera.sound.CameraSoundManager.playShutter()
         engine.takePhoto { uri ->
             if (uri != null) {
                 if (is50M) {
@@ -1332,6 +1334,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun executePortraitCapture() {
+        com.example.camera.sound.CameraSoundManager.playShutter()
         engine.captureStillBitmap { capturedBitmap ->
             if (capturedBitmap == null) {
                 showToast("Portrait capture failed")
@@ -1352,9 +1355,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun triggerVideoCapture() {
         if (engine.isRecordingVideo.value) {
+            com.example.camera.sound.CameraSoundManager.playStopVideo()
             engine.stopVideoRecording()
             showToast("Video saved to DCIM/Camera")
         } else {
+            com.example.camera.sound.CameraSoundManager.playStartVideo()
             engine.startVideoRecording { error ->
                 showToast("Recording error: $error")
             }

@@ -87,6 +87,7 @@ class CameraTrackingViewModel(application: Application) : AndroidViewModel(appli
     private var lastFrameTimeNs = System.nanoTime()
     private var frameCount = 0
     private var lastFpsCalcTimeMs = SystemClock.uptimeMillis()
+    private var lastFocusUpdateTime = 0L
 
     // Tracking input resolution performance monitoring & auto-fallback
     private var lastManualResolutionChangeTimeMs = SystemClock.uptimeMillis()
@@ -175,6 +176,11 @@ class CameraTrackingViewModel(application: Application) : AndroidViewModel(appli
                         activeTracking = true,
                         desiredZoom = 3.0f
                     )
+                    val now = SystemClock.uptimeMillis()
+                    if (now - lastFocusUpdateTime > 450) {
+                        lastFocusUpdateTime = now
+                        cameraXManager?.focusOnRegion(activeSub.bounds.centerX, activeSub.bounds.centerY)
+                    }
                 } else if (!cropController.isCinematicPanActive) {
                     // Manual tracking only: When no subject is locked, maintain wide view (1.0x).
                     // Tracking must start only when the user explicitly taps a subject.
@@ -255,6 +261,7 @@ class CameraTrackingViewModel(application: Application) : AndroidViewModel(appli
      * [normX, normY] are in normalized source frame coordinates [0..1].
      */
     fun onTapToTrack(normX: Float, normY: Float) {
+        cameraXManager?.focusOnRegion(normX, normY)
         subjectTracker.selectSubjectAt(
             srcX = normX,
             srcY = normY,
@@ -285,6 +292,8 @@ class CameraTrackingViewModel(application: Application) : AndroidViewModel(appli
     private fun captureTrackedPhoto(context: Context) {
         val srcBitmap = latestSourceBitmap ?: return
         if (srcBitmap.isRecycled) return
+
+        com.example.camera.sound.CameraSoundManager.playShutter()
 
         viewModelScope.launch(Dispatchers.IO) {
             _uiState.update { it.copy(flashFeedback = true) }
@@ -347,6 +356,7 @@ class CameraTrackingViewModel(application: Application) : AndroidViewModel(appli
         )
 
         if (success) {
+            com.example.camera.sound.CameraSoundManager.playStartVideo()
             _uiState.update { it.copy(isRecording = true, recordingDurationSec = 0) }
             recordingTimerJob = viewModelScope.launch {
                 var sec = 0
@@ -360,6 +370,7 @@ class CameraTrackingViewModel(application: Application) : AndroidViewModel(appli
     }
 
     private fun stopVideoRecording(context: Context) {
+        com.example.camera.sound.CameraSoundManager.playStopVideo()
         recordingTimerJob?.cancel()
         val recordedFile = videoRecorder.stop()
         _uiState.update { it.copy(isRecording = false, recordingDurationSec = 0) }

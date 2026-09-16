@@ -24,6 +24,77 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.camera.model.*
 
+fun getTopControlShape(layoutConfig: ModeLayoutConfig): androidx.compose.ui.graphics.Shape {
+    return when (layoutConfig.iconShapeOption) {
+        IconShapeOption.CIRCLE_GLASS -> CircleShape
+        IconShapeOption.ROUNDED_SQUARE -> RoundedCornerShape(10.dp)
+        IconShapeOption.HEXAGON -> RoundedCornerShape(6.dp)
+        IconShapeOption.PILL -> RoundedCornerShape(18.dp)
+        IconShapeOption.TRANSPARENT_NONE -> CircleShape
+    }
+}
+
+fun Modifier.topControlStyle(
+    layoutConfig: ModeLayoutConfig,
+    activeColor: Color? = null,
+    isPill: Boolean = false
+): Modifier {
+    val shape = if (isPill) RoundedCornerShape(17.dp) else getTopControlShape(layoutConfig)
+    val style = layoutConfig.iconStyleOption
+
+    val (bgColor, borderColor, borderWidth) = if (activeColor != null) {
+        Triple(activeColor.copy(alpha = 0.25f), activeColor, 1.2.dp)
+    } else {
+        when (style) {
+            IconStyleOption.ROUNDED_MATERIAL -> Triple(
+                Color(0xB21A1A1E),
+                Color.White.copy(alpha = 0.22f),
+                1.dp
+            )
+            IconStyleOption.MINIMAL_OUTLINE -> Triple(
+                Color(0x22000000),
+                Color.White.copy(alpha = 0.55f),
+                1.dp
+            )
+            IconStyleOption.SHARP_GEOMETRIC -> Triple(
+                Color(0xE614161C),
+                Color.White.copy(alpha = 0.9f),
+                1.5.dp
+            )
+            IconStyleOption.BOLD_SOLID -> Triple(
+                Color(0xEE222630),
+                Color.White.copy(alpha = 0.85f),
+                1.5.dp
+            )
+            IconStyleOption.CYBER_NEON -> Triple(
+                Color(0xE60A1828),
+                Color(0xFF00E5FF),
+                1.5.dp
+            )
+            IconStyleOption.FROSTED_GLASS -> Triple(
+                Color(0x44FFFFFF),
+                Color.White.copy(alpha = 0.6f),
+                1.dp
+            )
+            IconStyleOption.NEOMORPHIC -> Triple(
+                Color(0xDD2D333F),
+                Color(0x66FFFFFF),
+                1.5.dp
+            )
+            IconStyleOption.RETRO_BADGE -> Triple(
+                Color(0xEE2A2219),
+                Color(0xFFFFB300),
+                1.5.dp
+            )
+        }
+    }
+
+    return this
+        .clip(shape)
+        .background(bgColor)
+        .border(borderWidth, borderColor, shape)
+}
+
 /**
  * Master Top Control Bar matching the reference UI design.
  * Exactly 6 beautifully aligned elements across a pure dark glass bar:
@@ -86,21 +157,20 @@ fun TopControlBar(
             .testTag("master_top_control_bar")
     ) {
         val flashButton = @Composable {
+            val (flashIcon, flashColor) = when (flashMode) {
+                FlashMode.OFF -> Icons.Outlined.FlashOff to Color.White.copy(alpha = 0.85f)
+                FlashMode.AUTO -> Icons.Outlined.FlashAuto to accentColor
+                FlashMode.ON -> Icons.Outlined.FlashOn to accentColor
+                FlashMode.TORCH -> Icons.Outlined.Highlight to Color(0xFFFFB300)
+            }
+            val isFlashActive = flashMode != FlashMode.OFF
             IconButton(
                 onClick = onFlashClick,
                 modifier = Modifier
                     .size(buttonSize)
-                    .clip(CircleShape)
-                    .background(Color(0xB21A1A1E))
-                    .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
+                    .topControlStyle(layoutConfig, activeColor = if (isFlashActive) flashColor else null)
                     .testTag("flash_button")
             ) {
-                val (flashIcon, flashColor) = when (flashMode) {
-                    FlashMode.OFF -> Icons.Outlined.FlashOff to Color.White.copy(alpha = 0.85f)
-                    FlashMode.AUTO -> Icons.Outlined.FlashAuto to accentColor
-                    FlashMode.ON -> Icons.Outlined.FlashOn to accentColor
-                    FlashMode.TORCH -> Icons.Outlined.Highlight to Color(0xFFFFB300)
-                }
                 Icon(
                     imageVector = flashIcon,
                     contentDescription = "Flash: ${flashMode.title}",
@@ -117,9 +187,7 @@ fun TopControlBar(
                         onClick = onAudioToggle,
                         modifier = Modifier
                             .size(buttonSize)
-                            .clip(CircleShape)
-                            .background(Color(0xB21A1A1E))
-                            .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
+                            .topControlStyle(layoutConfig, activeColor = if (!isAudioEnabled) Color(0xFFFF6B6B) else null)
                             .testTag("video_audio_toggle_button")
                     ) {
                         Icon(
@@ -135,9 +203,7 @@ fun TopControlBar(
                         onClick = onTimerClick,
                         modifier = Modifier
                             .size(buttonSize)
-                            .clip(CircleShape)
-                            .background(Color(0xB21A1A1E))
-                            .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
+                            .topControlStyle(layoutConfig, activeColor = if (timerMode != TimerMode.OFF) accentColor else null)
                             .testTag("timer_button")
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -534,63 +600,19 @@ fun TopControlBar(
         }
 
         val gridAssistButton = @Composable {
-            if (cameraMode == CameraMode.CINEMA) {
-                val evVal = cinemaConfig.exposureCompensation
-                val evString = when {
-                    evVal > 0 -> "+${evVal / 3f}"
-                    evVal < 0 -> "${evVal / 3f}"
-                    else -> "±0.0"
-                }
-                Box(
-                    modifier = Modifier
-                        .height(34.dp)
-                        .clip(RoundedCornerShape(17.dp))
-                        .background(if (evVal != 0) accentColor.copy(alpha = 0.2f) else Color(0xB21A1A1E))
-                        .border(
-                            1.dp,
-                            if (evVal != 0) accentColor else Color.White.copy(alpha = 0.22f),
-                            RoundedCornerShape(17.dp)
-                        )
-                        .clickable {
-                            val nextEv = when (evVal) {
-                                0 -> 3
-                                3 -> 6
-                                6 -> -6
-                                -6 -> -3
-                                -3 -> 0
-                                else -> 0
-                            }
-                            onCinemaEvChange(nextEv)
-                        }
-                        .padding(horizontal = 10.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "EV $evString",
-                        color = if (evVal != 0) accentColor else Color.White,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        softWrap = false
-                    )
-                }
-            } else {
-                IconButton(
-                    onClick = onGridClick,
-                    modifier = Modifier
-                        .size(buttonSize)
-                        .clip(CircleShape)
-                        .background(Color(0xB21A1A1E))
-                        .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
+            IconButton(
+                onClick = onGridClick,
+                modifier = Modifier
+                    .size(buttonSize)
+                    .topControlStyle(layoutConfig, activeColor = if (gridType != GridType.NONE) accentColor else null)
                     .testTag("grid_button")
-                ) {
-                    Icon(
-                        imageVector = if (gridType == GridType.NONE) Icons.Outlined.GridOff else Icons.Outlined.GridOn,
-                        contentDescription = "Grid: ${gridType.title}",
-                        tint = if (gridType == GridType.NONE) Color.White.copy(alpha = 0.85f) else accentColor,
-                        modifier = Modifier.size(iconSize)
-                    )
-                }
+            ) {
+                Icon(
+                    imageVector = if (gridType == GridType.NONE) Icons.Outlined.GridOff else Icons.Outlined.GridOn,
+                    contentDescription = "Grid: ${gridType.title}",
+                    tint = if (gridType == GridType.NONE) Color.White.copy(alpha = 0.85f) else accentColor,
+                    modifier = Modifier.size(iconSize)
+                )
             }
         }
 
@@ -598,9 +620,7 @@ fun TopControlBar(
             Box(
                 modifier = Modifier
                     .height(34.dp)
-                    .clip(RoundedCornerShape(17.dp))
-                    .background(Color(0xB21A1A1E))
-                    .border(1.dp, accentColor.copy(alpha = 0.5f), RoundedCornerShape(17.dp))
+                    .topControlStyle(layoutConfig, activeColor = accentColor, isPill = true)
                     .clickable { onSettingsClick() }
                     .padding(horizontal = 10.dp),
                 contentAlignment = Alignment.Center
@@ -621,9 +641,7 @@ fun TopControlBar(
                 onClick = onSettingsClick,
                 modifier = Modifier
                     .size(buttonSize)
-                    .clip(CircleShape)
-                    .background(Color(0xB21A1A1E))
-                    .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
+                    .topControlStyle(layoutConfig)
                     .testTag("settings_button")
             ) {
                 Icon(
@@ -641,13 +659,7 @@ fun TopControlBar(
                 onClick = onPhotoFilterClick,
                 modifier = Modifier
                     .size(buttonSize)
-                    .clip(CircleShape)
-                    .background(if (isFilterActive) Color(0x3364FFDA) else Color(0xB21A1A1E))
-                    .border(
-                        1.dp,
-                        if (isFilterActive) Color(0xFF64FFDA) else Color.White.copy(alpha = 0.22f),
-                        CircleShape
-                    )
+                    .topControlStyle(layoutConfig, activeColor = if (isFilterActive) Color(0xFF64FFDA) else null)
                     .testTag("photo_filter_button")
             ) {
                 Icon(
@@ -665,13 +677,7 @@ fun TopControlBar(
                 onClick = onDollyZoomClick,
                 modifier = Modifier
                     .size(buttonSize)
-                    .clip(CircleShape)
-                    .background(if (isActive) accentColor.copy(alpha = 0.25f) else Color(0xB21A1A1E))
-                    .border(
-                        1.dp,
-                        if (isActive) accentColor else Color.White.copy(alpha = 0.22f),
-                        CircleShape
-                    )
+                    .topControlStyle(layoutConfig, activeColor = if (isActive) accentColor else null)
                     .testTag("top_dolly_zoom_button")
             ) {
                 Icon(
@@ -688,9 +694,7 @@ fun TopControlBar(
                 onClick = onPortraitStyleClick,
                 modifier = Modifier
                     .size(buttonSize)
-                    .clip(CircleShape)
-                    .background(Color(0x33FF8A65))
-                    .border(1.dp, Color(0xFFFF8A65), CircleShape)
+                    .topControlStyle(layoutConfig, activeColor = Color(0xFFFF8A65))
                     .testTag("portrait_style_button")
             ) {
                 Icon(
@@ -707,15 +711,13 @@ fun TopControlBar(
                 onClick = onCinemaSettingsClick,
                 modifier = Modifier
                     .size(buttonSize)
-                    .clip(CircleShape)
-                    .background(Color(0x33FFD54F))
-                    .border(1.dp, Color(0xFFFFD54F), CircleShape)
+                    .topControlStyle(layoutConfig, activeColor = accentColor)
                     .testTag("cinema_settings_quick_button")
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Movie,
                     contentDescription = "Cinema Settings",
-                    tint = Color(0xFFFFD54F),
+                    tint = accentColor,
                     modifier = Modifier.size(iconSize)
                 )
             }

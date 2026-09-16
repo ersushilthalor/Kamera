@@ -992,13 +992,13 @@ fun SettingsDrawer(
                             SettingsSubPage.STABILIZATION -> {
                                 item {
                                     SettingsSectionCard(title = "Stabilization Engine") {
+                                        LightToggleRow("Optical Image Stabilization (OIS)", "Physical hardware gyro actuator stabilization (Default: ON)", hybridStabilizationConfig.isOisPreferred) {
+                                            onHybridStabilizationChange(hybridStabilizationConfig.copy(isOisPreferred = !hybridStabilizationConfig.isOisPreferred))
+                                        }
                                         LightToggleRow("Hybrid Stabilization Master", "Combines physical OIS with electronic gyroscope EIS", hybridStabilizationConfig.isHybridEnabled) {
                                             onHybridStabilizationChange(hybridStabilizationConfig.copy(isHybridEnabled = !hybridStabilizationConfig.isHybridEnabled))
                                         }
-                                        LightToggleRow("Prefer Optical OIS", "Directs physical lens actuator for natural stabilization", hybridStabilizationConfig.isOisPreferred) {
-                                            onHybridStabilizationChange(hybridStabilizationConfig.copy(isOisPreferred = !hybridStabilizationConfig.isOisPreferred))
-                                        }
-                                        LightToggleRow("Ultra Steady Action Mode", "Applies aggressive sensor crop for extreme sports", hybridStabilizationConfig.isUltraStabilizationEnabled) {
+                                        LightToggleRow("Ultra Steady Action Mode", "Applies aggressive sensor stabilization (OIS stays OFF if disabled)", hybridStabilizationConfig.isUltraStabilizationEnabled) {
                                             onHybridStabilizationChange(hybridStabilizationConfig.copy(isUltraStabilizationEnabled = !hybridStabilizationConfig.isUltraStabilizationEnabled))
                                         }
                                     }
@@ -1258,6 +1258,68 @@ fun SettingsDrawer(
                                                 }
                                             }
                                             Spacer(modifier = Modifier.height(4.dp))
+                                        }
+                                    }
+                                }
+
+                                item {
+                                    SettingsSectionCard(title = "Top Icon Styles") {
+                                        Text("Select a distinct visual style for top controls:", fontSize = 12.sp, color = Color(0xFF6B7280))
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        IconStyleOption.entries.forEach { style ->
+                                            val isSel = uiCustomizationState.globalConfig.iconStyleOption == style
+                                            Surface(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 3.dp),
+                                                shape = RoundedCornerShape(10.dp),
+                                                color = if (isSel) Color(0xFFEFF6FF) else Color.White,
+                                                border = BorderStroke(
+                                                    if (isSel) 1.5.dp else 1.dp,
+                                                    if (isSel) Color(0xFF2563EB) else Color(0xFFE5E7EB)
+                                                )
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clickable {
+                                                            val newConfig = uiCustomizationState.globalConfig.copy(iconStyleOption = style)
+                                                            onUpdateGlobalLayoutConfig(newConfig)
+                                                            CameraMode.entries.forEach { mode ->
+                                                                val modeConf = uiCustomizationState.getConfigForMode(mode)
+                                                                onUpdateModeLayoutConfig(mode, modeConf.copy(iconStyleOption = style))
+                                                            }
+                                                        }
+                                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(
+                                                            text = style.label,
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontSize = 13.5.sp,
+                                                            color = if (isSel) Color(0xFF1D4ED8) else Color(0xFF1F2937)
+                                                        )
+                                                        Text(
+                                                            text = style.description,
+                                                            fontSize = 11.5.sp,
+                                                            color = Color(0xFF6B7280)
+                                                        )
+                                                    }
+                                                    RadioButton(
+                                                        selected = isSel,
+                                                        onClick = {
+                                                            val newConfig = uiCustomizationState.globalConfig.copy(iconStyleOption = style)
+                                                            onUpdateGlobalLayoutConfig(newConfig)
+                                                            CameraMode.entries.forEach { mode ->
+                                                                val modeConf = uiCustomizationState.getConfigForMode(mode)
+                                                                onUpdateModeLayoutConfig(mode, modeConf.copy(iconStyleOption = style))
+                                                            }
+                                                        },
+                                                        colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF2563EB))
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }

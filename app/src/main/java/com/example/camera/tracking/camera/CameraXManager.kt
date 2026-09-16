@@ -17,6 +17,7 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.params.MeteringRectangle
 import android.media.Image
 import android.media.ImageReader
 import android.os.Build
@@ -545,6 +546,60 @@ class CameraXManager(
             Log.d(TAG, "Camera2 repeating request updated: lens=$activeLens, fps=$activeFpsOption on camera $cId")
         } catch (e: Exception) {
             Log.e(TAG, "Error applying session settings: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Prioritizes autofocus and metering on a specific normalized screen coordinate (e.g. tracked subject).
+     */
+    fun focusOnRegion(normX: Float, normY: Float) {
+        val session = currentCaptureSession ?: return
+        val camera = currentCameraDevice ?: return
+        val mgr = cameraManager ?: return
+        val cId = currentCameraId ?: return
+
+        try {
+            val chars = mgr.getCameraCharacteristics(cId)
+            val sensorRect = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
+            val sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+            val isFront = (chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT)
+
+            val normSensorX = if (isFront || sensorOrientation == 270) {
+                (1.0f - normY).coerceIn(0f, 1f)
+            } else {
+                normY.coerceIn(0f, 1f)
+            }
+            val normSensorY = (1.0f - normX).coerceIn(0f, 1f)
+
+            val targetX = sensorRect.left + normSensorX * sensorRect.width()
+            val targetY = sensorRect.top + normSensorY * sensorRect.height()
+
+            val boxW = (sensorRect.width() * 0.12f).toInt().coerceIn(160, 400)
+            val boxH = (sensorRect.height() * 0.12f).toInt().coerceIn(160, 400)
+
+            val left = (targetX - boxW / 2).toInt().coerceIn(sensorRect.left, sensorRect.right - 10)
+            val right = (targetX + boxW / 2).toInt().coerceIn(left + 10, sensorRect.right)
+            val top = (targetY - boxH / 2).toInt().coerceIn(sensorRect.top, sensorRect.bottom - 10)
+            val bottom = (targetY + boxH / 2).toInt().coerceIn(top + 10, sensorRect.bottom)
+
+            val focusRect = MeteringRectangle(Rect(left, top, right, bottom), MeteringRectangle.METERING_WEIGHT_MAX)
+
+            val builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+            val surface = imageReader?.surface ?: return
+            builder.addTarget(surface)
+
+            val afModes = chars.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: intArrayOf()
+            if (afModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)) {
+                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+            } else if (afModes.contains(CaptureRequest.CONTROL_AF_MODE_AUTO)) {
+                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+            }
+            builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(focusRect))
+            builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(focusRect))
+
+            session.setRepeatingRequest(builder.build(), null, cameraHandler)
+        } catch (e: Exception) {
+            Log.w(TAG, "Focus on region failed: ${e.message}")
         }
     }
 

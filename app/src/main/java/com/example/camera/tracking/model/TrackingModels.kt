@@ -49,6 +49,7 @@ enum class ViewfinderResolution(
     val height: Int,
     val description: String
 ) {
+    HD_720P("720p HD", 720, 1280, "720 × 1280 (Lightweight 30 FPS Preview)"),
     FHD_1080P("1080p FHD", 1080, 1920, "1080 × 1920 (High-Speed 60fps)"),
     QHD_2K("2K QHD", 1440, 2560, "1440 × 2560 (Ultra-Sharp 2K)"),
     UHD_4K("4K UHD", 2160, 3840, "2160 × 3840 (Studio Master 4K)")
@@ -247,7 +248,7 @@ data class CameraTrackingUiState(
     val currentZoom: Float = 1.0f,
     val targetZoom: Float = 3.0f,
     val videoResolution: VideoResolution = VideoResolution.FHD_1080P,
-    val viewfinderResolution: ViewfinderResolution = ViewfinderResolution.FHD_1080P,
+    val viewfinderResolution: ViewfinderResolution = ViewfinderResolution.HD_720P,
     val isFrontCamera: Boolean = false,
     val isTorchOn: Boolean = false,
     val selectedLens: TrackingCameraLens = TrackingCameraLens.WIDE,
@@ -256,7 +257,7 @@ data class CameraTrackingUiState(
         TrackingCameraLens.WIDE,
         TrackingCameraLens.FRONT
     ),
-    val selectedFpsOption: TrackingFpsOption = TrackingFpsOption.FPS_60,
+    val selectedFpsOption: TrackingFpsOption = TrackingFpsOption.FPS_30,
     val trackingResolution: TrackingResolution = TrackingResolution.HD_720P,
     val trackingResolutionNotice: String? = null,
     val learnedSubjectsCount: Int = 0

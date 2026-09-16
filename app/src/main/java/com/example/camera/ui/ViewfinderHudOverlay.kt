@@ -61,16 +61,7 @@ fun ViewfinderHudOverlay(
     Box(modifier = modifier.fillMaxSize()) {
         when (templateType) {
             UiTemplateType.STOCK_PIXEL -> {
-                // Pixel-Style Vertical Brightness / Exposure Slider on the Right Edge (omitted in Photo mode)
-                if (cameraMode != CameraMode.PHOTO) {
-                    PixelVerticalExposureSlider(
-                        exposureCompensation = exposureCompensation,
-                        onExposureChange = onExposureChange,
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = 12.dp)
-                    )
-                }
+                // Exposure slider removed per user request; auto exposure operates internally
             }
 
             UiTemplateType.MINIMAL_PRO -> {
@@ -89,17 +80,6 @@ fun ViewfinderHudOverlay(
                 MinimalProFramingHud(
                     modifier = Modifier.fillMaxSize()
                 )
-
-                // Vertical EV Dial on Right Edge (omitted in Photo mode)
-                if (cameraMode != CameraMode.PHOTO) {
-                    MinimalProEvDial(
-                        exposureCompensation = exposureCompensation,
-                        onExposureChange = onExposureChange,
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = 14.dp)
-                    )
-                }
             }
 
             UiTemplateType.FUTURISTIC_GLASS -> {
@@ -107,17 +87,6 @@ fun ViewfinderHudOverlay(
                 CyberGlassHud(
                     modifier = Modifier.fillMaxSize()
                 )
-
-                // Neon Cyber Vertical Exposure Control (omitted in Photo mode)
-                if (cameraMode != CameraMode.PHOTO) {
-                    CyberExposureSlider(
-                        exposureCompensation = exposureCompensation,
-                        onExposureChange = onExposureChange,
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = 16.dp)
-                    )
-                }
             }
 
             UiTemplateType.DSLR_PRO -> {
@@ -131,42 +100,22 @@ fun ViewfinderHudOverlay(
                         .align(Alignment.TopCenter)
                         .padding(top = 60.dp)
                 )
-
-                // Right-Side Exposure Step Ladder (omitted in Photo mode)
-                if (cameraMode != CameraMode.PHOTO) {
-                    DslrExposureLadder(
-                        exposureCompensation = exposureCompensation,
-                        onExposureChange = onExposureChange,
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = 14.dp)
-                    )
-                }
             }
 
             UiTemplateType.IMMERSIVE_EDGE -> {
-                // Edge gesture indicators: Left for Exposure (disabled in Photo mode), Right for Zoom
+                // Edge gesture indicators: Right for Zoom, exposure slider removed
                 ImmersiveEdgeControls(
                     exposureCompensation = exposureCompensation,
                     onExposureChange = onExposureChange,
                     currentZoom = currentZoom,
                     onZoomChange = onZoomChange,
-                    enableExposure = cameraMode != CameraMode.PHOTO,
+                    enableExposure = false,
                     modifier = Modifier.fillMaxSize()
                 )
             }
 
             else -> {
-                // Standard subtle vertical exposure slider on right (omitted in Photo mode)
-                if (cameraMode != CameraMode.PHOTO) {
-                    PixelVerticalExposureSlider(
-                        exposureCompensation = exposureCompensation,
-                        onExposureChange = onExposureChange,
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = 12.dp)
-                    )
-                }
+                // Exposure slider removed; auto exposure operates internally
             }
         }
     }
