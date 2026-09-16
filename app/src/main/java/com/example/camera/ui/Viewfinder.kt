@@ -84,65 +84,34 @@ fun Viewfinder(
         val containerWidth = maxWidth
         val containerHeight = maxHeight
 
-        val isVideoLayout = (cameraMode == CameraMode.VIDEO ||
-                cameraMode == CameraMode.CINEMA ||
-                cameraMode == CameraMode.DOLLY_ZOOM)
-
-        // Calculate layout geometry:
-        // In Video and Cinema modes, viewfinder extends vertically down towards shutter clearance
-        val shutterClearance = 118.dp
-        val topClearance = 60.dp
-        val maxAvailableHeight = if (isVideoLayout) {
-            (containerHeight - shutterClearance - topClearance).coerceAtLeast(100.dp)
-        } else {
-            containerHeight
-        }
-
         // Expected aspect ratio for current mode (portrait display: height / width)
-        val targetModeRatio = when (cameraMode) {
-            CameraMode.VIDEO, CameraMode.CINEMA, CameraMode.DOLLY_ZOOM -> {
-                if (aspectRatio > 1.4f) aspectRatio else (16f / 9f)
-            }
-            CameraMode.PHOTO, CameraMode.PORTRAIT, CameraMode.NIGHT, CameraMode.MORE -> {
-                if (aspectRatio in 1.1f..1.5f) aspectRatio else (4f / 3f)
-            }
-            else -> {
-                if (aspectRatio > 0.1f) {
-                    if (aspectRatio < 1.0f) 1f / aspectRatio else aspectRatio
-                } else (4f / 3f)
+        // 4:3 Photo -> 4f / 3f = 1.333f
+        // 16:9 Video/Cinema -> 16f / 9f = 1.777f
+        val targetRatio = if (aspectRatio > 0.1f) {
+            if (aspectRatio < 1.0f) 1f / aspectRatio else aspectRatio
+        } else {
+            when (cameraMode) {
+                CameraMode.VIDEO, CameraMode.CINEMA, CameraMode.DOLLY_ZOOM -> 16f / 9f
+                else -> 4f / 3f
             }
         }
 
-        // Determine exact aspect ratio from active preview buffer size
-        val bufRatio = if (previewBufferSize != null && previewBufferSize.height > 0 && previewBufferSize.width > 0) {
-            kotlin.math.max(previewBufferSize.width, previewBufferSize.height).toFloat() /
-                    kotlin.math.min(previewBufferSize.width, previewBufferSize.height).toFloat()
-        } else null
-
-        // Use active buffer ratio to ensure exact 1:1 pixel match with 0 vertical or horizontal stretch
-        val finalRatio = bufRatio ?: targetModeRatio
-
-        // Exact aspect ratio geometry: targetHeight is strictly targetWidth * finalRatio
-        var calcWidth = containerWidth
-        var calcHeight = containerWidth * finalRatio
-        if (calcHeight > maxAvailableHeight) {
-            calcHeight = maxAvailableHeight
-            calcWidth = calcHeight / finalRatio
+        // Viewfinder spans dimensions dictated strictly by the native camera output aspect ratio,
+        // fitting cleanly within the container bounds with letterboxing/pillarboxing as appropriate.
+        val (targetWidth, targetHeight) = if (containerWidth * targetRatio <= containerHeight) {
+            containerWidth to (containerWidth * targetRatio)
+        } else {
+            (containerHeight / targetRatio) to containerHeight
         }
-        val targetWidth = calcWidth
-        val targetHeight = calcHeight
 
-        // Viewfinder is positioned cleanly:
-        // Video/Cinema extends down to almost the top edge of the shutter button
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black),
-            contentAlignment = if (isVideoLayout) Alignment.BottomCenter else Alignment.Center
+            contentAlignment = Alignment.Center
         ) {
             Box(
                 modifier = Modifier
-                    .padding(bottom = if (isVideoLayout) shutterClearance else 0.dp)
                     .size(width = targetWidth, height = targetHeight)
                     .pointerInput(Unit) {
                         detectTransformGestures { _, _, zoom, _ ->

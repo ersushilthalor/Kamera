@@ -17,6 +17,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 private const val TAG = "StreamCompositor"
 
@@ -84,9 +85,21 @@ class CameraStreamCompositor {
     @Volatile
     var isLittlePreviewEnabled: Boolean = false
 
-    // Frame availability flags
+    // Frame availability flags and independent frame counters
     private val isMainFrameAvailable = AtomicBoolean(false)
     private val isUltraWideFrameAvailable = AtomicBoolean(false)
+    private val mainFrameCount = AtomicLong(0L)
+    private val ultraWideFrameCount = AtomicLong(0L)
+    private val lastMainTimestampNs = AtomicLong(0L)
+    private val lastUltraWideTimestampNs = AtomicLong(0L)
+
+    // Switch Verification
+    @Volatile
+    private var targetSwitchBaselineFrameCount: Long = 0L
+    @Volatile
+    private var switchPendingFirstFrame: Boolean = false
+    @Volatile
+    private var forceMainRender: Boolean = false
 
     // Latency Measurement
     @Volatile
@@ -289,6 +302,7 @@ class CameraStreamCompositor {
         val mainSt = SurfaceTexture(mainTexId).apply {
             setDefaultBufferSize(1920, 1080)
             setOnFrameAvailableListener({
+                mainFrameCount.incrementAndGet()
                 isMainFrameAvailable.set(true)
                 triggerRender()
             }, handler)
@@ -300,6 +314,7 @@ class CameraStreamCompositor {
         val uwSt = SurfaceTexture(ultraWideTexId).apply {
             setDefaultBufferSize(1920, 1080)
             setOnFrameAvailableListener({
+                ultraWideFrameCount.incrementAndGet()
                 isUltraWideFrameAvailable.set(true)
                 triggerRender()
             }, handler)
@@ -347,6 +362,7 @@ class CameraStreamCompositor {
                 try {
                     mainEglSurface = EGL14.eglCreateWindowSurface(display, eglConfig, surface, surfaceAttribs, 0)
                     Log.d(TAG, "Main Viewfinder EGL Surface attached ($mainWidth x $mainHeight)")
+                    forceMainRender = true
                     triggerRender()
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to create main EGL window surface", e)
@@ -401,9 +417,23 @@ class CameraStreamCompositor {
     fun switchActiveStream(targetLens: LensType, startTimestampNs: Long = System.nanoTime()) {
         switchStartNs = startTimestampNs
         activeLensType = targetLens
-        Log.i(TAG, "Compositor switching active stream to: $targetLens (No session teardown)")
+        targetSwitchBaselineFrameCount = if (targetLens == LensType.ULTRAWIDE) {
+            ultraWideFrameCount.get()
+        } else {
+            mainFrameCount.get()
+        }
+        switchPendingFirstFrame = true
+        forceMainRender = true
+        Log.i(TAG, "Compositor switching active stream to: $targetLens (baselineFrameCount=$targetSwitchBaselineFrameCount)")
         triggerRender()
     }
+
+    fun getMainFrameCount(): Long = mainFrameCount.get()
+    fun getUltraWideFrameCount(): Long = ultraWideFrameCount.get()
+    fun getMainTimestamp(): Long = lastMainTimestampNs.get()
+    fun getUltraWideTimestamp(): Long = lastUltraWideTimestampNs.get()
+    fun getFrameCount(lens: LensType): Long = if (lens == LensType.ULTRAWIDE) ultraWideFrameCount.get() else mainFrameCount.get()
+    fun getTimestamp(lens: LensType): Long = if (lens == LensType.ULTRAWIDE) lastUltraWideTimestampNs.get() else lastMainTimestampNs.get()
 
     private fun triggerRender() {
         glHandler?.post {
@@ -415,11 +445,17 @@ class CameraStreamCompositor {
         val display = eglDisplay ?: return
         val ctx = eglContext ?: return
 
+        var newMainFrame = false
+        var newUltraWideFrame = false
+
         // 1. Consume available frames to keep both hardware pipelines flowing & 3A converged
         if (isMainFrameAvailable.getAndSet(false)) {
             try {
                 mainCameraSurfaceTexture?.updateTexImage()
                 mainCameraSurfaceTexture?.getTransformMatrix(mainTexMatrix)
+                val ts = mainCameraSurfaceTexture?.timestamp ?: 0L
+                lastMainTimestampNs.set(ts)
+                newMainFrame = true
             } catch (e: Exception) {
                 Log.w(TAG, "Error updating main texture image", e)
             }
@@ -429,6 +465,9 @@ class CameraStreamCompositor {
             try {
                 ultraWideCameraSurfaceTexture?.updateTexImage()
                 ultraWideCameraSurfaceTexture?.getTransformMatrix(ultraWideTexMatrix)
+                val ts = ultraWideCameraSurfaceTexture?.timestamp ?: 0L
+                lastUltraWideTimestampNs.set(ts)
+                newUltraWideFrame = true
             } catch (e: Exception) {
                 Log.w(TAG, "Error updating ultrawide texture image", e)
             }
@@ -436,9 +475,25 @@ class CameraStreamCompositor {
 
         val activeLens = activeLensType
         val mainSurf = mainEglSurface
+        val shouldForceMain = forceMainRender
+        forceMainRender = false
+
+        val hasNewActiveFrame = if (activeLens == LensType.ULTRAWIDE) {
+            newUltraWideFrame
+        } else {
+            newMainFrame
+        }
+
+        val activeTotalFrames = if (activeLens == LensType.ULTRAWIDE) {
+            ultraWideFrameCount.get()
+        } else {
+            mainFrameCount.get()
+        }
 
         // 2. Render to Main Viewfinder EGL Surface
-        if (mainSurf != null) {
+        // Only render if a new frame arrived for active lens, or on forceMainRender when frames exist.
+        // Do not repeatedly render the same old Ultra-Wide frame.
+        if (mainSurf != null && (hasNewActiveFrame || (shouldForceMain && activeTotalFrames > 0L))) {
             EGL14.eglMakeCurrent(display, mainSurf, mainSurf, ctx)
             GLES20.glViewport(0, 0, mainWidth, mainHeight)
             GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f)
@@ -452,20 +507,24 @@ class CameraStreamCompositor {
 
             EGL14.eglSwapBuffers(display, mainSurf)
 
-            // 3. Record switch latency upon first valid frame from the target lens
+            // 3. Verify new frame arrival after switch request before completing switch latency
             val startNs = switchStartNs
-            if (startNs > 0) {
-                switchStartNs = 0L
-                val latencyNs = System.nanoTime() - startNs
-                val latencyMs = latencyNs / 1_000_000L
-                Log.i(TAG, "[LATENCY] Instant switch to $activeLens displayed in ${latencyMs}ms (0 sessions recreated)")
-                onFirstFrameRendered?.invoke(activeLens, latencyMs)
+            if (switchPendingFirstFrame && hasNewActiveFrame && activeTotalFrames > targetSwitchBaselineFrameCount) {
+                switchPendingFirstFrame = false
+                if (startNs > 0) {
+                    switchStartNs = 0L
+                    val latencyNs = System.nanoTime() - startNs
+                    val latencyMs = latencyNs / 1_000_000L
+                    Log.i(TAG, "[LATENCY] Instant switch to $activeLens verified and displayed in ${latencyMs}ms (frame #$activeTotalFrames > $targetSwitchBaselineFrameCount)")
+                    onFirstFrameRendered?.invoke(activeLens, latencyMs)
+                }
             }
         }
 
         // 4. Render to Little Preview EGL Surface (if visible)
         val littleSurf = littleEglSurface
-        if (isLittlePreviewEnabled && littleSurf != null) {
+        val hasNewStandbyFrame = if (activeLens == LensType.ULTRAWIDE) newMainFrame else newUltraWideFrame
+        if (isLittlePreviewEnabled && littleSurf != null && (hasNewStandbyFrame || shouldForceMain)) {
             EGL14.eglMakeCurrent(display, littleSurf, littleSurf, ctx)
             GLES20.glViewport(0, 0, littleWidth, littleHeight)
             GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f)

@@ -905,50 +905,7 @@ class Camera2Engine(private val context: Context) {
 
         val switchStartNs = System.nanoTime()
 
-        // 1. Instant Concurrent Lens Switch (No camera close, no session recreation, no surface recreation)
-        if (motorolaSwitchEngine.isConcurrentSessionReady(lens)) {
-            val bundle = motorolaSwitchEngine.switchConcurrentLens(
-                targetLens = lens,
-                currentDevice = cameraDevice,
-                currentSession = captureSession,
-                currentJpegReader = imageReaderJpeg,
-                currentYuvReader = imageReaderYuv,
-                currentLens = previousLens,
-                switchStartNs = switchStartNs
-            )
-            if (bundle != null) {
-                synchronized(cameraLifecycleLock) {
-                    cameraDevice = bundle.cameraDevice
-                    captureSession = bundle.captureSession
-                    bundle.imageReaderJpeg?.let { imageReaderJpeg = it }
-                    bundle.imageReaderYuv?.let { imageReaderYuv = it }
-                    _isCameraReady.value = true
-                }
-                inspectCapabilities(lens.cameraId)
-                // Attach main captureCallback to the active repeating request so AE/AF metrics continue updating UI
-                try {
-                    val previewSurf = if (lens.lensType == LensType.ULTRAWIDE) {
-                        motorolaSwitchEngine.compositor.ultraWideCameraSurface
-                    } else {
-                        motorolaSwitchEngine.compositor.mainCameraSurface
-                    }
-                    val req = bundle.cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                        if (previewSurf != null && previewSurf.isValid) {
-                            addTarget(previewSurf)
-                        }
-                        applyCommonSettings(this)
-                    }
-                    bundle.captureSession.setRepeatingRequest(req.build(), captureCallback, backgroundHandler)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Non-fatal: could not update repeating request callback on swapped session", e)
-                }
-                val switchDurationMs = (System.nanoTime() - switchStartNs) / 1_000_000L
-                Log.i(TAG, "[LATENCY] Instant switch to ${lens.lensType} completed in ${switchDurationMs}ms (Session swapped, 0 openCamera, 0 createCaptureSession)")
-                return
-            }
-        }
-
-        // 2. Fallback Fast Handover if target camera was warm in background (non-concurrent HAL):
+        // Fast Handover if target camera was warm in background (non-concurrent HAL):
         val warmDevice = motorolaSwitchEngine.handoffBackgroundCamera(lens)
         if (warmDevice != null) {
             inspectCapabilities(lens.cameraId)
@@ -976,22 +933,17 @@ class Camera2Engine(private val context: Context) {
                 val optimalSize = _previewBufferSize.value ?: Size(1920, 1080)
                 texture.setDefaultBufferSize(optimalSize.width, optimalSize.height)
 
-                val compositorSurf = if (lens.lensType == LensType.ULTRAWIDE) {
-                    motorolaSwitchEngine.compositor.ultraWideCameraSurface
-                } else {
-                    motorolaSwitchEngine.compositor.mainCameraSurface
-                }
-                previewSurface = if (compositorSurf != null && compositorSurf.isValid) {
-                    compositorSurf
-                } else {
-                    Surface(texture)
+                val curSurf = previewSurface
+                if (curSurf == null || !curSurf.isValid) {
+                    try { curSurf?.release() } catch (ignored: Throwable) {}
+                    previewSurface = Surface(texture)
                 }
 
                 setupImageReaders(lens.cameraId)
                 createCameraCaptureSession()
                 motorolaSwitchEngine.updatePrimaryLens(lens, _availableLenses.value)
                 val elapsedMs = (System.nanoTime() - switchStartNs) / 1_000_000L
-                Log.i(TAG, "[LATENCY] Fallback fast handover to ${lens.lensType} completed in ${elapsedMs}ms")
+                Log.i(TAG, "[LATENCY] Fast handover to ${lens.lensType} completed in ${elapsedMs}ms")
             }
         } ?: run {
             closeCamera()
@@ -1126,6 +1078,9 @@ class Camera2Engine(private val context: Context) {
                         ?: previewSizes.firstOrNull()
                         ?: Size(1920, 1080)
 
+                    val actualRatio = max(optimalPreviewSize.width, optimalPreviewSize.height).toFloat() /
+                            min(optimalPreviewSize.width, optimalPreviewSize.height).toFloat()
+                    _previewAspectRatio.value = actualRatio
                     _previewBufferSize.value = optimalPreviewSize
                     texture.setDefaultBufferSize(optimalPreviewSize.width, optimalPreviewSize.height)
 
@@ -1140,22 +1095,13 @@ class Camera2Engine(private val context: Context) {
                     captureSession = null
                     _isCameraReady.value = false
 
-                    // Reuse existing valid surface if available to avoid BufferQueue disconnects
-                    val compositorSurf = if (lens.lensType == LensType.ULTRAWIDE) {
-                        motorolaSwitchEngine.compositor.ultraWideCameraSurface
-                    } else {
-                        motorolaSwitchEngine.compositor.mainCameraSurface
-                    }
+                    // Direct native Surface connection to TextureView
                     val curSurf = previewSurface
                     if (curSurf == null || !curSurf.isValid) {
                         try {
                             curSurf?.release()
                         } catch (ignored: Exception) {}
-                        previewSurface = if (compositorSurf != null && compositorSurf.isValid) {
-                            compositorSurf
-                        } else {
-                            Surface(texture)
-                        }
+                        previewSurface = Surface(texture)
                     }
 
                     setupImageReaders(lens.cameraId)
@@ -1192,7 +1138,9 @@ class Camera2Engine(private val context: Context) {
         if (texture != null) {
             val optimalSize = _previewBufferSize.value ?: Size(1920, 1080)
             texture.setDefaultBufferSize(optimalSize.width, optimalSize.height)
-            motorolaSwitchEngine.compositor.setMainViewfinderSurface(Surface(texture), optimalSize.width, optimalSize.height)
+            if (previewSurface == null || !previewSurface!!.isValid) {
+                previewSurface = Surface(texture)
+            }
             if (prevTexture != texture || cameraDevice == null) {
                 if (_isCameraInitialized.value) {
                     startCamera()
@@ -1201,7 +1149,6 @@ class Camera2Engine(private val context: Context) {
                 reconfigureSession()
             }
         } else {
-            motorolaSwitchEngine.compositor.setMainViewfinderSurface(null, 0, 0)
             closeCamera()
         }
     }
@@ -1261,25 +1208,19 @@ class Camera2Engine(private val context: Context) {
                 ?: previewSizes.firstOrNull()
                 ?: Size(1920, 1080)
 
+            val actualRatio = max(optimalPreviewSize.width, optimalPreviewSize.height).toFloat() /
+                    min(optimalPreviewSize.width, optimalPreviewSize.height).toFloat()
+            _previewAspectRatio.value = actualRatio
             val sensorOrient = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
             _sensorOrientation.value = sensorOrient
             _previewBufferSize.value = optimalPreviewSize
 
             texture.setDefaultBufferSize(optimalPreviewSize.width, optimalPreviewSize.height)
-            try {
-                previewSurface?.release()
-            } catch (ignored: Throwable) {}
-
-            motorolaSwitchEngine.compositor.awaitInitialized(300)
-            val compositorSurf = if (lens.lensType == LensType.ULTRAWIDE) {
-                motorolaSwitchEngine.compositor.ultraWideCameraSurface
-            } else {
-                motorolaSwitchEngine.compositor.mainCameraSurface
-            }
-            previewSurface = if (compositorSurf != null && compositorSurf.isValid) {
-                compositorSurf
-            } else {
-                Surface(texture)
+            if (previewSurface == null || !previewSurface!!.isValid) {
+                try {
+                    previewSurface?.release()
+                } catch (ignored: Throwable) {}
+                previewSurface = Surface(texture)
             }
 
             // Setup ImageReader for Photo mode
@@ -1671,22 +1612,27 @@ class Camera2Engine(private val context: Context) {
             manualIso?.let { builder.set(CaptureRequest.SENSOR_SENSITIVITY, it) }
             manualExposureTimeNs?.let { builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, it) }
         } else {
-            // Auto Exposure mode + Flash configuration
-            when (flashMode) {
-                FlashMode.OFF -> {
-                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
-                }
-                FlashMode.AUTO -> {
-                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
-                }
-                FlashMode.ON -> {
-                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
-                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_SINGLE)
-                }
-                FlashMode.TORCH -> {
-                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
+            // Auto Exposure mode + Flash configuration (safely verifying hardware flash support)
+            if (!caps.supportsFlash || flashMode == FlashMode.OFF) {
+                builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+            } else {
+                when (flashMode) {
+                    FlashMode.AUTO -> {
+                        builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
+                    }
+                    FlashMode.ON -> {
+                        builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
+                        builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_SINGLE)
+                    }
+                    FlashMode.TORCH -> {
+                        builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                        builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
+                    }
+                    FlashMode.OFF -> {
+                        builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                        builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+                    }
                 }
             }
             // Exposure compensation (apply cinema EV if in Cinema mode, or standard exposure index)
@@ -1702,11 +1648,15 @@ class Camera2Engine(private val context: Context) {
         // White Balance
         builder.set(CaptureRequest.CONTROL_AWB_MODE, whiteBalanceMode.camera2Mode)
 
-        // Focus
+        // Focus (safely verifying camera capabilities, e.g. fixed-focus front cameras)
         when (focusMode) {
             FocusMode.MANUAL -> {
-                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
-                builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, manualFocusDistance)
+                if (caps.supportsManualSensor) {
+                    builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+                    builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, manualFocusDistance)
+                } else {
+                    builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+                }
             }
             FocusMode.CONTINUOUS -> {
                 val mode = if (currentMode == CameraMode.VIDEO || currentMode == CameraMode.CINEMA ||
@@ -1715,13 +1665,25 @@ class Camera2Engine(private val context: Context) {
                 } else {
                     CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
                 }
-                builder.set(CaptureRequest.CONTROL_AF_MODE, mode)
+                if (caps.supportedAfModes.contains(FocusMode.CONTINUOUS)) {
+                    builder.set(CaptureRequest.CONTROL_AF_MODE, mode)
+                } else {
+                    builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+                }
             }
             FocusMode.AUTO -> {
-                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+                if (caps.supportedAfModes.contains(FocusMode.AUTO)) {
+                    builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+                } else {
+                    builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+                }
             }
             FocusMode.MACRO -> {
-                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_MACRO)
+                if (caps.supportedAfModes.contains(FocusMode.MACRO)) {
+                    builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_MACRO)
+                } else {
+                    builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+                }
             }
         }
 
@@ -4198,10 +4160,13 @@ class Camera2Engine(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Error closing camera device", e)
         }
-        try {
-            previewSurface?.release()
-            previewSurface = null
-        } catch (ignored: Throwable) {}
+        // Only release previewSurface if texture was destroyed or surface is invalid
+        if (previewSurfaceTexture == null || previewSurface?.isValid != true) {
+            try {
+                previewSurface?.release()
+                previewSurface = null
+            } catch (ignored: Throwable) {}
+        }
         try {
             previewRequestBuilder = null
         } catch (ignored: Throwable) {}

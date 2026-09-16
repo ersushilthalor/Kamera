@@ -570,6 +570,9 @@ class MotorolaInstantSwitchEngine(
 
             currentPrimaryLens = targetLens
 
+            // Keep the standby camera repeating request continuously running
+            ensureStandbyRepeatingRequest()
+
             val isPreviewOn = _switchState.value.isShowUltraWidePreview
             _switchState.value = _switchState.value.copy(
                 activeStandbyLens = currentLens?.lensType,
@@ -578,6 +581,38 @@ class MotorolaInstantSwitchEngine(
             )
 
             return result
+        }
+    }
+
+    /**
+     * Keep repeating request continuously running on the standby camera so frames continue flowing.
+     */
+    fun ensureStandbyRepeatingRequest() {
+        synchronized(sessionLock) {
+            val session = standbyCaptureSession ?: return
+            val device = standbyCameraDevice ?: return
+            val lens = activeStandbyLens ?: return
+            val handler = backgroundHandler ?: return
+            val previewSurf = if (lens.lensType == LensType.ULTRAWIDE) {
+                compositor.ultraWideCameraSurface
+            } else {
+                compositor.mainCameraSurface
+            } ?: return
+            if (!previewSurf.isValid) return
+
+            try {
+                val req = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                    addTarget(previewSurf)
+                    set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+                    set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                    set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                    set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
+                }.build()
+                session.setRepeatingRequest(req, null, handler)
+                Log.d(TAG, "Standby repeating request verified running for ${lens.lensType}")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to re-submit standby repeating request for ${lens.lensType}", e)
+            }
         }
     }
 
