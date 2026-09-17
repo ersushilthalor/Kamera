@@ -1240,6 +1240,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         showToast("Skin Tone Correction: ${if (next) "ON" else "OFF"}")
     }
 
+    fun toggleOpticalBlurGuided() {
+        val next = !_portraitConfig.value.opticalBlurGuided
+        _portraitConfig.update { it.copy(opticalBlurGuided = next) }
+        preferences.portraitOpticalBlurGuided = next
+        preferences.setModePortraitConfig(_cameraMode.value, _portraitConfig.value)
+        showToast("Optical Blur Guidance: ${if (next) "ON" else "OFF"}")
+    }
+
+    fun setOpticalBlurGuided(enabled: Boolean) {
+        _portraitConfig.update { it.copy(opticalBlurGuided = enabled) }
+        preferences.portraitOpticalBlurGuided = enabled
+        preferences.setModePortraitConfig(_cameraMode.value, _portraitConfig.value)
+        showToast("Optical Blur Guidance: ${if (enabled) "ON" else "OFF"}")
+    }
+
     fun setSelectedPhotoFilter(filter: PhotoFilter) {
         _selectedPhotoFilter.value = filter
         engine.selectedPhotoFilter = filter

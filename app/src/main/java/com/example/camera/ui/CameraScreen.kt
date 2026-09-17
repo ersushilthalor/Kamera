@@ -499,6 +499,7 @@ fun CameraScreen(
                 onBokehStyleSelected = { viewModel.setPortraitBokehStyle(it) },
                 onToggleFaceEnhancement = { viewModel.togglePortraitFaceEnhancement() },
                 onToggleSkinTone = { viewModel.togglePortraitSkinTone() },
+                onToggleOpticalBlurGuided = { viewModel.toggleOpticalBlurGuided() },
                 onClose = { viewModel.setPortraitSettingsOpen(false) },
                 modifier = Modifier.padding(horizontal = 12.dp)
             )

@@ -977,6 +977,9 @@ fun SettingsDrawer(
                                         LightToggleRow("AI Subject Auto-Framing", "Automatically centers and tracks recognized subjects", isAiAutoFramingEnabled) {
                                             onAiAutoFramingToggle(!isAiAutoFramingEnabled)
                                         }
+                                        LightToggleRow("Optical Blur Guided Portrait", "Fuses physical lens optical defocus with depth bokeh and fine hair matting", portraitConfig.opticalBlurGuided) {
+                                            onPortraitConfigChange(portraitConfig.copy(opticalBlurGuided = !portraitConfig.opticalBlurGuided))
+                                        }
                                         HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
                                         Text("Simulated Portrait Aperture", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
                                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

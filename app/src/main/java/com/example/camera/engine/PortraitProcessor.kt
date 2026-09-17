@@ -16,6 +16,7 @@ import android.util.Log
 import com.example.camera.model.BokehStyle
 import com.example.camera.model.PortraitConfig
 import com.example.camera.model.PortraitStyle
+import com.example.camera.engine.optical.OpticalBlurGuidedPipeline
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.segmentation.Segmentation
@@ -72,6 +73,23 @@ class PortraitProcessor(private val context: Context) {
         config: PortraitConfig,
         onProgress: (Float, String) -> Unit = { _, _ -> }
     ): Uri? = withContext(Dispatchers.Default) {
+        // Optical Blur Guided Portrait Pipeline branch (when enabled)
+        if (config.opticalBlurGuided) {
+            onProgress(0.05f, "Initializing Optical Blur Guided Portrait...")
+            val opticalPipeline = OpticalBlurGuidedPipeline(context)
+            val opticalPortraitBmp = opticalPipeline.processOpticalGuidedPortrait(
+                fullResBitmap = orientedBitmap,
+                config = config,
+                onProgress = onProgress
+            )
+            onProgress(0.95f, "Saving optical portrait...")
+            val savedUri = saveToMediaStore(opticalPortraitBmp)
+            if (opticalPortraitBmp != orientedBitmap && !opticalPortraitBmp.isRecycled) {
+                opticalPortraitBmp.recycle()
+            }
+            return@withContext savedUri
+        }
+
         var scaledProcessingBitmap: Bitmap? = null
         var mlBitmap: Bitmap? = null
         var decontaminatedBackground: Bitmap? = null

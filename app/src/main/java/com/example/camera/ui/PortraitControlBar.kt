@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -38,6 +39,7 @@ fun PortraitControlBar(
     onBokehStyleSelected: (BokehStyle) -> Unit,
     onToggleFaceEnhancement: () -> Unit = {},
     onToggleSkinTone: () -> Unit = {},
+    onToggleOpticalBlurGuided: () -> Unit = {},
     onClose: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -222,6 +224,76 @@ fun PortraitControlBar(
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                         )
                     }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Row 4: Optical Blur Guided Mode Toggle
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = if (config.opticalBlurGuided) Color(0xFFFFD54F).copy(alpha = 0.16f) else Color.White.copy(alpha = 0.05f),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (config.opticalBlurGuided) Color(0xFFFFD54F).copy(alpha = 0.8f) else Color.White.copy(alpha = 0.12f)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onToggleOpticalBlurGuided() }
+                    .testTag("optical_blur_guided_toggle")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "Optical Blur Guidance",
+                                color = if (config.opticalBlurGuided) Color(0xFFFFD54F) else Color.White.copy(alpha = 0.85f),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (config.opticalBlurGuided) Color(0xFFFFD54F) else Color.White.copy(alpha = 0.15f)
+                            ) {
+                                Text(
+                                    text = if (config.opticalBlurGuided) "ACTIVE" else "OFF",
+                                    color = if (config.opticalBlurGuided) Color.Black else Color.White.copy(alpha = 0.6f),
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = if (config.opticalBlurGuided)
+                                "Physical lens defocus + depth bokeh & fine hair matting"
+                            else
+                                "Standard synthetic portrait blur",
+                            color = Color.White.copy(alpha = 0.55f),
+                            fontSize = 10.sp
+                        )
+                    }
+                    Switch(
+                        checked = config.opticalBlurGuided,
+                        onCheckedChange = { onToggleOpticalBlurGuided() },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color(0xFFFFD54F),
+                            checkedTrackColor = Color(0xFFFFD54F).copy(alpha = 0.4f),
+                            uncheckedThumbColor = Color.White.copy(alpha = 0.6f),
+                            uncheckedTrackColor = Color.White.copy(alpha = 0.1f)
+                        ),
+                        modifier = Modifier.scale(0.8f)
+                    )
                 }
             }
         }

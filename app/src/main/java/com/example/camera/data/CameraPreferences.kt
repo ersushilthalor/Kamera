@@ -31,6 +31,7 @@ class CameraPreferences(context: Context) {
         private const val KEY_LAST_FACING = "pref_last_facing"
         private const val KEY_PORTRAIT_BLUR = "pref_portrait_blur"
         private const val KEY_PORTRAIT_APERTURE = "pref_portrait_aperture"
+        private const val KEY_PORTRAIT_OPTICAL_BLUR_GUIDED = "pref_portrait_optical_blur_guided"
         private const val KEY_SAVE_SELFIE_AS_PREVIEWED = "pref_save_selfie_as_previewed"
         private const val KEY_VIDEO_HDR_MODE = "pref_video_hdr_mode"
         private const val KEY_VIDEO_HDR_INTENSITY = "pref_video_hdr_intensity"
@@ -192,6 +193,10 @@ class CameraPreferences(context: Context) {
     var portraitAperture: String
         get() = prefs.getString(KEY_PORTRAIT_APERTURE, "f/1.4") ?: "f/1.4"
         set(value) = prefs.edit().putString(KEY_PORTRAIT_APERTURE, value).apply()
+
+    var portraitOpticalBlurGuided: Boolean
+        get() = prefs.getBoolean(KEY_PORTRAIT_OPTICAL_BLUR_GUIDED, true)
+        set(value) = prefs.edit().putBoolean(KEY_PORTRAIT_OPTICAL_BLUR_GUIDED, value).apply()
 
     var saveSelfieAsPreviewed: Boolean
         get() = prefs.getBoolean(KEY_SAVE_SELFIE_AS_PREVIEWED, true)
@@ -986,16 +991,19 @@ class CameraPreferences(context: Context) {
     fun setModePortraitConfig(mode: CameraMode, config: PortraitConfig) {
         portraitBlurStrength = config.blurStrength
         portraitAperture = config.simulatedAperture
+        portraitOpticalBlurGuided = config.opticalBlurGuided
         prefs.edit()
             .putFloat(modeKey(mode, "portrait_blur"), config.blurStrength)
             .putString(modeKey(mode, "portrait_aperture"), config.simulatedAperture)
+            .putBoolean(modeKey(mode, "portrait_optical_blur_guided"), config.opticalBlurGuided)
             .apply()
     }
 
     fun getModePortraitConfig(mode: CameraMode): PortraitConfig {
         val blur = prefs.getFloat(modeKey(mode, "portrait_blur"), portraitBlurStrength)
         val ap = prefs.getString(modeKey(mode, "portrait_aperture"), portraitAperture) ?: portraitAperture
-        return PortraitConfig(blurStrength = blur, simulatedAperture = ap)
+        val opticalGuided = prefs.getBoolean(modeKey(mode, "portrait_optical_blur_guided"), portraitOpticalBlurGuided)
+        return PortraitConfig(blurStrength = blur, simulatedAperture = ap, opticalBlurGuided = opticalGuided)
     }
 
     fun setModeNightConfig(mode: CameraMode, config: NightConfig) {

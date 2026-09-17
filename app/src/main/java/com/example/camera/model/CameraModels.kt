@@ -22,7 +22,8 @@ data class PortraitConfig(
     val selectedStyle: PortraitStyle = PortraitStyle.NATURAL,
     val faceEnhancement: Boolean = false,
     val skinToneCorrection: Boolean = false,
-    val showDepthPreview: Boolean = false
+    val showDepthPreview: Boolean = false,
+    val opticalBlurGuided: Boolean = true
 )
 
 enum class PortraitStyle(
