@@ -53,8 +53,21 @@ class OpticalBlurGuidedPipeline(private val context: Context) {
         config: PortraitConfig,
         onProgress: (Float, String) -> Unit = { _, _ -> }
     ): Bitmap = withContext(Dispatchers.Default) {
-        val width = fullResBitmap.width
-        val height = fullResBitmap.height
+        val origWidth = fullResBitmap.width
+        val origHeight = fullResBitmap.height
+
+        // Memory-safe working resolution (1920 max dim produces flagship-grade detail without risk of OOM)
+        val maxWorkingDim = 1920
+        val maxOrigDim = max(origWidth, origHeight)
+        val workingScale = if (maxOrigDim > maxWorkingDim) maxWorkingDim.toFloat() / maxOrigDim else 1.0f
+        val width = (origWidth * workingScale).toInt().coerceAtLeast(1)
+        val height = (origHeight * workingScale).toInt().coerceAtLeast(1)
+
+        val workingBitmap = if (workingScale < 1.0f) {
+            Bitmap.createScaledBitmap(fullResBitmap, width, height, true)
+        } else {
+            fullResBitmap
+        }
 
         var decontaminatedBg: Bitmap? = null
         var variableBokehBg: Bitmap? = null
@@ -65,10 +78,10 @@ class OpticalBlurGuidedPipeline(private val context: Context) {
 
             // Stage 1: Optical Defocus Estimation
             // Estimates spatial distribution of real optical blur already produced by physical lens
-            // Generates continuous floating-point defocus map and confidence map
+            // Generates continuous floating-point defocus map and confidence map on an 800px grid for high efficiency
             val defocusResult = defocusEstimator.estimateOpticalDefocus(
-                bitmap = fullResBitmap,
-                analysisScale = if (max(width, height) > 2400) (2400f / max(width, height)) else 1.0f
+                bitmap = workingBitmap,
+                analysisScale = (800f / max(width, height)).coerceAtMost(1.0f)
             )
 
             // Upsample defocus maps if analysis was performed on a scaled grid
@@ -87,14 +100,14 @@ class OpticalBlurGuidedPipeline(private val context: Context) {
             onProgress(0.25f, "Segmenting subject contours & estimating depth...")
 
             // Stage 2: Hardware-accelerated Subject Segmentation (ML Kit)
-            val mlScale = (1280f / max(width, height)).coerceAtMost(1.0f)
+            val mlScale = (1080f / max(width, height)).coerceAtMost(1.0f)
             val targetMlW = (width * mlScale).toInt().coerceAtLeast(1)
             val targetMlH = (height * mlScale).toInt().coerceAtLeast(1)
 
             val inputForMl = if (mlScale < 1.0f) {
-                Bitmap.createScaledBitmap(fullResBitmap, targetMlW, targetMlH, true)
+                Bitmap.createScaledBitmap(workingBitmap, targetMlW, targetMlH, true)
             } else {
-                fullResBitmap
+                workingBitmap
             }
 
             val inputImage = InputImage.fromBitmap(inputForMl, 0)
@@ -107,7 +120,7 @@ class OpticalBlurGuidedPipeline(private val context: Context) {
                 Log.w(TAG, "ML Kit segmentation fallback to center depth prior", t)
                 null
             } finally {
-                if (inputForMl != fullResBitmap && !inputForMl.isRecycled) {
+                if (inputForMl != workingBitmap && inputForMl != fullResBitmap && !inputForMl.isRecycled) {
                     inputForMl.recycle()
                 }
             }
@@ -153,7 +166,7 @@ class OpticalBlurGuidedPipeline(private val context: Context) {
 
             // Stage 4: High-Resolution Foreground Alpha Matting (Dedicated Hair Strand Pass)
             val alphaMatte = fusionEngine.computeHighResolutionHairMatte(
-                sourceBitmap = fullResBitmap,
+                sourceBitmap = workingBitmap,
                 initialAlpha = initialMask,
                 width = width,
                 height = height
@@ -162,8 +175,6 @@ class OpticalBlurGuidedPipeline(private val context: Context) {
             onProgress(0.70f, "Fusing optical defocus with depth bokeh...")
 
             // Stage 5: Optical & Depth Fusion
-            // Combines optical defocus, depth map, foreground segmentation, and alpha matte
-            // Computes synthetic blur: R_synthetic = sqrt(max(0, R_target^2 - R_existing^2))
             val fusionResult = fusionEngine.fuseOpticalAndDepth(
                 defocusMap = defocusMap,
                 confidenceMap = confidenceMap,
@@ -179,14 +190,13 @@ class OpticalBlurGuidedPipeline(private val context: Context) {
 
             // Stage 6: Anti-Halo Background Edge Decontamination
             decontaminatedBg = fusionEngine.decontaminateBackgroundBeforeBlur(
-                source = fullResBitmap,
+                source = workingBitmap,
                 alphaMask = alphaMatte,
                 width = width,
                 height = height
             )
 
             // Stage 7: Depth-Dependent Variable-Radius Bokeh Rendering
-            // Preserves existing optical defocus and synthesizes required aperture blur
             variableBokehBg = bokehRenderer.renderVariableRadiusBokeh(
                 source = decontaminatedBg,
                 syntheticRadii = fusionResult.syntheticBlurRadius,
@@ -199,7 +209,7 @@ class OpticalBlurGuidedPipeline(private val context: Context) {
 
             // Stage 8: Precision Hair-Aware Subject Compositing
             finalPortraitBmp = bokehRenderer.compositeSharpSubjectWithHairMatte(
-                original = fullResBitmap,
+                original = workingBitmap,
                 blurredBackground = variableBokehBg,
                 alphaMatte = alphaMatte,
                 skinToneCorrection = config.skinToneCorrection,
@@ -207,9 +217,15 @@ class OpticalBlurGuidedPipeline(private val context: Context) {
                 style = config.selectedStyle
             )
 
-            finalPortraitBmp
+            finalPortraitBmp ?: workingBitmap
+        } catch (t: Throwable) {
+            Log.e(TAG, "Error during optical guided portrait processing, returning source", t)
+            workingBitmap
         } finally {
             try {
+                if (workingBitmap != fullResBitmap && !workingBitmap.isRecycled && workingBitmap != finalPortraitBmp) {
+                    workingBitmap.recycle()
+                }
                 if (decontaminatedBg != null && !decontaminatedBg.isRecycled) {
                     decontaminatedBg.recycle()
                 }

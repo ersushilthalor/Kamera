@@ -7,11 +7,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
@@ -29,37 +30,27 @@ import androidx.compose.ui.unit.sp
 import com.example.camera.model.*
 
 /**
- * 19 Comprehensive Camera Settings Categories:
- * Camera, Photo, Video, Cinema, Lens, Zoom, Focus, Exposure, HDR, AI,
- * Stabilization, Codec, Resolution/FPS, Audio, Grid, Gesture,
- * UI Customization, Performance, and Advanced.
+ * Premium Stock Flagship Camera Settings Categories:
+ * 1. Capture & Quality
+ * 2. Video & Audio
+ * 3. Processing & AI
+ * 4. Controls & Gestures
+ * 5. Advanced & Labs
+ * 6. General / About
  */
-enum class SettingsSubPage(val title: String, val subtitle: String, val icon: ImageVector) {
-    CAMERA("Camera", "General preferences, selfie mirror & sounds", Icons.Outlined.Camera),
-    PHOTO("Photo", "Megapixel mode, RAW sensor, JPEG quality & filters", Icons.Outlined.CameraAlt),
-    FEATURES("Features", "AI Zoom, computational super-resolution & smart capture", Icons.Outlined.AutoAwesome),
-    VIDEO("Video", "Quality presets, stabilization, frame rates & bitrates", Icons.Outlined.Videocam),
-    CINEMA("Cinema", "10-bit HLG, Flat Log, zebra stripes & waveforms", Icons.Outlined.MovieCreation),
-    LENS("Lens", "Multi-lens switching, focal lengths & aux scan", Icons.Outlined.CenterFocusStrong),
-    ZOOM("Zoom", "Quick presets, digital stabilization & transition speed", Icons.Outlined.ZoomIn),
-    FOCUS("Focus", "Tap to focus, manual focus distance & AF lock", Icons.Outlined.FilterCenterFocus),
-    EXPOSURE("Exposure", "EV compensation range, manual ISO & shutter speed", Icons.Outlined.WbSunny),
-    HDR("HDR", "Auto HDR capture, video tone-mapping & night fusion", Icons.Outlined.HdrOn),
-    AI("AI", "Auto-framing, portrait bokeh depth & skin smoothing", Icons.Outlined.AutoAwesome),
-    STABILIZATION("Stabilization", "Hybrid physical OIS, electronic EIS & action mode", Icons.Outlined.HdrAuto),
-    CODEC("Codec", "HEVC / H.265 compression & AAC audio format", Icons.Outlined.Code),
-    RESOLUTION_FPS("Resolution / FPS", "Sensor resolution matrix & recording framerates", Icons.Outlined.Hd),
-    AUDIO("Audio", "Microphone recording, stereo array & wind filter", Icons.Outlined.Mic),
-    GRID("Grid", "Rule of thirds, golden ratio & tilt leveler", Icons.Outlined.GridOn),
-    GESTURE("Gesture", "Volume key actions, double-tap & swipe controls", Icons.Outlined.TouchApp),
-    UI_CUSTOMIZATION("UI Customization", "Pixel, Minimal Pro, Cyber Glass, DSLR & layout editor", Icons.Outlined.DashboardCustomize),
-    PERFORMANCE("Performance", "Viewfinder refresh rate, GPU boost & thermals", Icons.Outlined.Speed),
-    ADVANCED("Advanced", "Camera2 HAL hardware level, diagnostics & reset", Icons.Outlined.Build)
+enum class FlagshipCategory(val title: String, val icon: ImageVector) {
+    ALL("All", Icons.Outlined.GridView),
+    CAPTURE("Capture & Quality", Icons.Outlined.CameraAlt),
+    VIDEO("Video & Audio", Icons.Outlined.Videocam),
+    PROCESSING("Processing & AI", Icons.Outlined.AutoAwesome),
+    CONTROLS("Controls & Gestures", Icons.Outlined.TouchApp),
+    ADVANCED("Advanced & Labs", Icons.Outlined.Build),
+    ABOUT("General / About", Icons.Outlined.Info)
 }
 
 /**
- * Modern, Categorized Settings Sheet containing all 19 camera categories.
- * Fully interactive, connected to real app state and persistence.
+ * Redesigned Premium Stock Flagship Camera Settings Sheet.
+ * Simple, clean, minimal dark theme matching the camera viewfinder.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -126,6 +117,8 @@ fun SettingsDrawer(
     onVideoBitrateSelected: (VideoBitrateOption) -> Unit = {},
     onStabilizationToggle: (Boolean) -> Unit = {},
     onHybridStabilizationChange: (HybridStabilizationConfig) -> Unit = {},
+    onOisToggle: (Boolean) -> Unit = {},
+    onUltraStabilizationToggle: () -> Unit = {},
     onNightConfigChange: (NightConfig) -> Unit = {},
     onTapFocusConfigChange: (TapFocusConfig) -> Unit = {},
     onAudioToggle: () -> Unit = {},
@@ -184,15 +177,16 @@ fun SettingsDrawer(
 ) {
     if (!isOpen) return
 
-    var activeSubPage by remember { mutableStateOf<SettingsSubPage?>(null) }
+    var selectedFilterCategory by remember { mutableStateOf(FlagshipCategory.ALL) }
+    var showResetDialog by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Color(0xFFF8F9FA),
-        contentColor = Color(0xFF1F2937),
+        containerColor = Color(0xFF121316),
+        contentColor = Color(0xFFF3F4F6),
         dragHandle = {
-            BottomSheetDefaults.DragHandle(color = Color(0xFFD1D5DB))
+            BottomSheetDefaults.DragHandle(color = Color(0xFF374151))
         },
         modifier = modifier.testTag("settings_bottom_sheet")
     ) {
@@ -209,1416 +203,825 @@ fun SettingsDrawer(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (activeSubPage != null) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF26210A))
+                            .border(1.dp, Color(0xFFFFD54F).copy(alpha = 0.6f), CircleShape),
+                        contentAlignment = Alignment.Center
                     ) {
-                        IconButton(
-                            onClick = { activeSubPage = null },
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFE5E7EB))
-                                .testTag("settings_back_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                                tint = Color(0xFF1F2937),
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = activeSubPage?.title ?: "Settings",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF111827)
-                            )
-                            Text(
-                                text = activeSubPage?.subtitle ?: "Camera settings category",
-                                fontSize = 11.5.sp,
-                                color = Color(0xFF6B7280),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                } else {
-                    Column {
-                        Text(
-                            text = "Settings",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF111827)
-                        )
-                        Text(
-                            text = "Complete controls, engines & device hardware",
-                            fontSize = 12.sp,
-                            color = Color(0xFF6B7280)
+                        Icon(
+                            imageVector = Icons.Outlined.Settings,
+                            contentDescription = null,
+                            tint = Color(0xFFFFD54F),
+                            modifier = Modifier.size(17.dp)
                         )
                     }
+                    Text(
+                        text = "Camera Settings",
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = (-0.2).sp
+                    )
                 }
 
                 IconButton(
                     onClick = onDismiss,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(32.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFFE5E7EB))
-                        .testTag("settings_close_button")
+                        .background(Color(0xFF1F2127))
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
-                        contentDescription = "Close",
-                        tint = Color(0xFF374151),
-                        modifier = Modifier.size(20.dp)
+                        contentDescription = "Close Settings",
+                        tint = Color(0xFF9CA3AF),
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Body: Category Directory vs Dedicated SubPage
-            AnimatedContent(
-                targetState = activeSubPage,
-                transitionSpec = {
-                    if (targetState != null) {
-                        (slideInHorizontally { it } + fadeIn()) togetherWith (slideOutHorizontally { -it } + fadeOut())
-                    } else {
-                        (slideInHorizontally { -it } + fadeIn()) togetherWith (slideOutHorizontally { it } + fadeOut())
-                    }
-                },
-                label = "settingsPageTransition"
-            ) { subPage ->
-                if (subPage == null) {
-                    // MAIN DIRECTORY LIST: All 19 categories
-                    LazyColumn(
+            // Category Filter Pills
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(FlagshipCategory.entries.toTypedArray()) { cat ->
+                    val isSelected = selectedFilterCategory == cat
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = if (isSelected) Color(0xFFFFD54F) else Color(0xFF1E2026),
+                        border = BorderStroke(
+                            width = 1.dp,
+                            color = if (isSelected) Color(0xFFFFD54F) else Color(0xFF2C2F38)
+                        ),
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                            .clickable { selectedFilterCategory = cat }
+                            .testTag("category_pill_${cat.name}")
                     ) {
-                        SettingsSubPage.entries.forEach { page ->
-                            item(key = page.name) {
-                                val summary = when (page) {
-                                    SettingsSubPage.CAMERA -> if (saveSelfieAsPreviewed) "Mirror On · $shutterFeedback" else "Standard · $shutterFeedback"
-                                    SettingsSubPage.PHOTO -> {
-                                        val refocusTag = if (isRefocusPhotoEnabled) " · Refocus ON" else ""
-                                        if (photoMegapixelMode == PhotoMegapixelMode.M50) "50MP Ultra$refocusTag · JPEG $jpegQuality%" else "12MP Standard$refocusTag · JPEG $jpegQuality%"
-                                    }
-                                    SettingsSubPage.FEATURES -> if (isHighQualityZoomEnabled) "HQ Zoom ON · ${zoomProcessingQuality.label} Clarity" else "HQ Zoom OFF"
-                                    SettingsSubPage.VIDEO -> "${selectedVideoResolution?.let { "${it.width}x${it.height}" } ?: "4K"} · ${videoFps}fps · $videoCodec"
-                                    SettingsSubPage.CINEMA -> "${cinemaConfig.colorProfile.label} · ${cinemaConfig.logBitDepth.label}"
-                                    SettingsSubPage.LENS -> "${availableLenses.size} lenses available · Deep Scan"
-                                    SettingsSubPage.ZOOM -> "Current: %.1fx · Smooth transition".format(currentZoom)
-                                    SettingsSubPage.FOCUS -> if (tapFocusConfig.isTapToFocusEnabled) "Tap to Focus · ${focusMode.name}" else focusMode.name
-                                    SettingsSubPage.EXPOSURE -> "EV ${if (exposureCompensation >= 0) "+%.1f".format(exposureCompensation/3f) else "%.1f".format(exposureCompensation/3f)} · ISO ${manualIso ?: "Auto"}"
-                                    SettingsSubPage.HDR -> if (isAutoHdrEnabled) "Auto HDR ON · Ghost suppression" else "Standard Dynamic Range"
-                                    SettingsSubPage.AI -> if (isAiAutoFramingEnabled) "Auto-framing ON · Bokeh ${portraitConfig.simulatedAperture}" else "Bokeh ${portraitConfig.simulatedAperture} · Face Retouch"
-                                    SettingsSubPage.STABILIZATION -> if (isVideoStabilizationEnabled && hybridStabilizationConfig.isHybridEnabled) "Coordinated OIS + EIS" else if (isVideoStabilizationEnabled) "Standard EIS" else "Off"
-                                    SettingsSubPage.CODEC -> "$videoCodec (High Efficiency) · AAC Audio"
-                                    SettingsSubPage.RESOLUTION_FPS -> "${selectedPhotoResolution?.let { "${it.width}x${it.height}" } ?: "Native"} · ${videoFps} FPS"
-                                    SettingsSubPage.AUDIO -> if (isAudioEnabled) "Recording ON · $audioSource · Wind filter" else "Muted"
-                                    SettingsSubPage.GRID -> "${gridType.name} · Leveler ${if (horizonLeveler) "ON" else "OFF"}"
-                                    SettingsSubPage.GESTURE -> "Volume: $volumeKeyAction · Double-Tap: $doubleTapAction"
-                                    SettingsSubPage.UI_CUSTOMIZATION -> "${uiCustomizationState.selectedTemplate.title} Active"
-                                    SettingsSubPage.PERFORMANCE -> "${viewfinderFps}fps Viewfinder · GPU Accelerated"
-                                    SettingsSubPage.ADVANCED -> "Camera2 HAL · Sensor Array · Factory Reset"
-                                }
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = cat.icon,
+                                contentDescription = null,
+                                tint = if (isSelected) Color(0xFF121316) else Color(0xFF9CA3AF),
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = cat.title,
+                                color = if (isSelected) Color(0xFF121316) else Color(0xFFE5E7EB),
+                                fontSize = 11.5.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
 
-                                SettingsCategoryTile(
-                                    page = page,
-                                    summary = summary,
-                                    onClick = { activeSubPage = page }
+            // Settings Content Body
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                contentPadding = PaddingValues(bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // 1. CAPTURE & QUALITY
+                if (selectedFilterCategory == FlagshipCategory.ALL || selectedFilterCategory == FlagshipCategory.CAPTURE) {
+                    item {
+                        FlagshipSectionHeader("CAPTURE & QUALITY")
+                        FlagshipCard {
+                            // Photo Resolution
+                            FlagshipRowItem(
+                                icon = Icons.Outlined.PhotoSizeSelectActual,
+                                title = "Photo Resolution",
+                                subtitle = "${photoMegapixelMode.label} · ${selectedPhotoResolution?.let { "${it.width}x${it.height}" } ?: "High Res"}"
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    PhotoMegapixelMode.entries.forEach { mode ->
+                                        val isSelected = photoMegapixelMode == mode
+                                        FlagshipSmallChip(
+                                            label = mode.label,
+                                            isSelected = isSelected,
+                                            onClick = { onPhotoMegapixelModeSelected(mode) }
+                                        )
+                                    }
+                                }
+                            }
+
+                            FlagshipDivider()
+
+                            // RAW Capture (DNG)
+                            FlagshipSwitchItem(
+                                icon = Icons.Outlined.RawOn,
+                                title = "RAW (DNG) Capture",
+                                subtitle = "Save 16-bit uncompressed sensor data",
+                                checked = isRawEnabled,
+                                onCheckedChange = { onRawToggle() }
+                            )
+
+                            FlagshipDivider()
+
+                            // JPEG Quality
+                            FlagshipRowItem(
+                                icon = Icons.Outlined.HighQuality,
+                                title = "JPEG Quality",
+                                subtitle = "$jpegQuality% compression quality"
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf(90, 95, 100).forEach { q ->
+                                        FlagshipSmallChip(
+                                            label = "$q%",
+                                            isSelected = jpegQuality == q,
+                                            onClick = { onJpegQualitySelected(q) }
+                                        )
+                                    }
+                                }
+                            }
+
+                            FlagshipDivider()
+
+                            // Refocus Photo
+                            FlagshipSwitchItem(
+                                icon = Icons.Outlined.FilterCenterFocus,
+                                title = "Refocus Photo",
+                                subtitle = "Burst capture with varying focal depths",
+                                checked = isRefocusPhotoEnabled,
+                                onCheckedChange = onRefocusPhotoToggle
+                            )
+
+                            FlagshipDivider()
+
+                            // Grid Overlay
+                            FlagshipRowItem(
+                                icon = Icons.Outlined.GridOn,
+                                title = "Framing Grid",
+                                subtitle = gridType.name.replace("_", " ")
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    GridType.entries.take(4).forEach { gt ->
+                                        FlagshipSmallChip(
+                                            label = when (gt) {
+                                                GridType.NONE -> "Off"
+                                                GridType.THIRDS -> "3x3"
+                                                GridType.GOLDEN -> "Golden"
+                                                GridType.SQUARE -> "1:1"
+                                                else -> gt.title
+                                            },
+                                            isSelected = gridType == gt,
+                                            onClick = { onGridTypeSelected(gt) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 2. VIDEO & AUDIO
+                if (selectedFilterCategory == FlagshipCategory.ALL || selectedFilterCategory == FlagshipCategory.VIDEO) {
+                    item {
+                        FlagshipSectionHeader("VIDEO & AUDIO")
+                        FlagshipCard {
+                            // Video Resolution
+                            FlagshipRowItem(
+                                icon = Icons.Outlined.Hd,
+                                title = "Video Resolution",
+                                subtitle = selectedVideoResolution?.let { "${it.width}x${it.height}" } ?: "4K UHD"
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    val is4k = selectedVideoResolution?.width == 3840
+                                    val is1080 = selectedVideoResolution?.width == 1920
+                                    val is720 = selectedVideoResolution?.width == 1280
+
+                                    FlagshipSmallChip("4K", is4k) {
+                                        capabilities.supportedVideoResolutions.firstOrNull { it.width == 3840 }
+                                            ?.let { onVideoResolutionSelected(it) }
+                                    }
+                                    FlagshipSmallChip("1080p", is1080) {
+                                        capabilities.supportedVideoResolutions.firstOrNull { it.width == 1920 }
+                                            ?.let { onVideoResolutionSelected(it) }
+                                    }
+                                    FlagshipSmallChip("720p", is720) {
+                                        capabilities.supportedVideoResolutions.firstOrNull { it.width == 1280 }
+                                            ?.let { onVideoResolutionSelected(it) }
+                                    }
+                                }
+                            }
+
+                            FlagshipDivider()
+
+                            // Frame Rate
+                            FlagshipRowItem(
+                                icon = Icons.Outlined.Speed,
+                                title = "Framerate",
+                                subtitle = "$videoFps frames per second"
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf(24, 30, 60).forEach { fps ->
+                                        FlagshipSmallChip(
+                                            label = "${fps}fps",
+                                            isSelected = videoFps == fps,
+                                            onClick = { onVideoFpsSelected(fps) }
+                                        )
+                                    }
+                                }
+                            }
+
+                            FlagshipDivider()
+
+                            // Video Codec
+                            FlagshipRowItem(
+                                icon = Icons.Outlined.Code,
+                                title = "Video Codec",
+                                subtitle = if (videoCodec == "HEVC") "HEVC / H.265 (High Efficiency)" else "H.264 (Maximum Compatibility)"
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf("HEVC", "AVC").forEach { codec ->
+                                        FlagshipSmallChip(
+                                            label = codec,
+                                            isSelected = videoCodec == codec,
+                                            onClick = { onVideoCodecSelected(codec) }
+                                        )
+                                    }
+                                }
+                            }
+
+                            FlagshipDivider()
+
+                            // Audio Recording
+                            FlagshipSwitchItem(
+                                icon = Icons.Outlined.Mic,
+                                title = "Record Audio",
+                                subtitle = if (isAudioEnabled) "Stereo microphone capture" else "Video muted",
+                                checked = isAudioEnabled,
+                                onCheckedChange = { onAudioToggle() }
+                            )
+
+                            if (isAudioEnabled) {
+                                FlagshipDivider()
+
+                                // Wind Noise Reduction
+                                FlagshipSwitchItem(
+                                    icon = Icons.Outlined.Air,
+                                    title = "Wind Noise Reduction",
+                                    subtitle = "Hardware microphone frequency filtering",
+                                    checked = windNoiseReduction,
+                                    onCheckedChange = onWindNoiseReductionToggle
                                 )
                             }
                         }
+                    }
+                }
 
-                        item {
-                            Spacer(modifier = Modifier.height(28.dp))
+                // 3. PROCESSING & AI
+                if (selectedFilterCategory == FlagshipCategory.ALL || selectedFilterCategory == FlagshipCategory.PROCESSING) {
+                    item {
+                        FlagshipSectionHeader("PROCESSING & AI")
+                        FlagshipCard {
+                            // Optical Blur Guided Portrait
+                            FlagshipSwitchItem(
+                                icon = Icons.Outlined.Portrait,
+                                title = "Optical Blur Portrait",
+                                subtitle = "Optical defocus estimation & fine hair matting",
+                                checked = portraitConfig.opticalBlurGuided,
+                                onCheckedChange = { onPortraitConfigChange(portraitConfig.copy(opticalBlurGuided = it)) }
+                            )
+
+                            FlagshipDivider()
+
+                            // AI Super-Resolution Zoom
+                            FlagshipSwitchItem(
+                                icon = Icons.Outlined.ZoomIn,
+                                title = "AI Super-Resolution Zoom",
+                                subtitle = "Multi-frame subpixel detail enhancement",
+                                checked = isHighQualityZoomEnabled,
+                                onCheckedChange = onHighQualityZoomToggle
+                            )
+
+                            FlagshipDivider()
+
+                            // Auto HDR
+                            FlagshipSwitchItem(
+                                icon = Icons.Outlined.HdrOn,
+                                title = "Auto HDR Fusion",
+                                subtitle = "Zero-shutter-lag multi-exposure dynamic range",
+                                checked = isAutoHdrEnabled,
+                                onCheckedChange = onAutoHdrToggle
+                            )
+
+                            FlagshipDivider()
+
+                            // Ultra Action Stabilization
+                            FlagshipSwitchItem(
+                                icon = Icons.Outlined.MotionPhotosOn,
+                                title = "Ultra Action Stabilization",
+                                subtitle = "Rock-steady wide gyro EIS for sports & fast movement",
+                                checked = hybridStabilizationConfig.isUltraStabilizationEnabled,
+                                onCheckedChange = { onUltraStabilizationToggle() }
+                            )
+
+                            FlagshipDivider()
+
+                            // Optical Image Stabilization (OIS)
+                            FlagshipSwitchItem(
+                                icon = Icons.Outlined.Camera,
+                                title = "Optical Image Stabilization (OIS)",
+                                subtitle = if (capabilities.supportsOis) "Physical voice-coil lens stabilization" else "Sensor does not support hardware OIS",
+                                checked = hybridStabilizationConfig.isOisPreferred && capabilities.supportsOis,
+                                enabled = capabilities.supportsOis,
+                                onCheckedChange = onOisToggle
+                            )
+
+                            FlagshipDivider()
+
+                            // Video Stabilization (EIS)
+                            FlagshipSwitchItem(
+                                icon = Icons.Outlined.VideoStable,
+                                title = "Video Stabilization (EIS)",
+                                subtitle = "ISP digital sensor frame margin compensation",
+                                checked = isVideoStabilizationEnabled && hybridStabilizationConfig.isEisPreferred,
+                                onCheckedChange = {
+                                    onStabilizationToggle(it)
+                                    onHybridStabilizationChange(hybridStabilizationConfig.copy(isEisPreferred = it, isHybridEnabled = it))
+                                }
+                            )
+
+                            FlagshipDivider()
+
+                            // Cinema Log Profile
+                            FlagshipRowItem(
+                                icon = Icons.Outlined.MovieFilter,
+                                title = "Cinema Log Curve",
+                                subtitle = "${cinemaConfig.colorProfile.label} (${cinemaConfig.logBitDepth.label})"
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf(CinemaColorProfile.REC_709, CinemaColorProfile.FLAT_LOG, CinemaColorProfile.HLG).forEach { profile ->
+                                        FlagshipSmallChip(
+                                            label = profile.label,
+                                            isSelected = cinemaConfig.colorProfile == profile,
+                                            onClick = { onCinemaConfigChange(cinemaConfig.copy(colorProfile = profile)) }
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
-                } else {
-                    // DEDICATED SUBPAGES
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        when (subPage) {
-                            // 1. CAMERA
-                            SettingsSubPage.CAMERA -> {
-                                item {
-                                    SettingsSectionCard(title = "General Camera Preferences") {
-                                        LightToggleRow(
-                                            title = "Save Selfie as Previewed",
-                                            subtitle = "Mirrors front-facing photos to match what you see in the viewfinder",
-                                            isChecked = saveSelfieAsPreviewed,
-                                            onToggle = { onSaveSelfieAsPreviewedToggle(!saveSelfieAsPreviewed) }
-                                        )
-                                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        Text("Shutter Sound & Haptic Feedback", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            LightSelectPill("Sound & Haptics", shutterFeedback == "SOUND_AND_HAPTIC", { onShutterFeedbackSelected("SOUND_AND_HAPTIC") }, Modifier.weight(1f))
-                                            LightSelectPill("Haptic Only", shutterFeedback == "HAPTIC_ONLY", { onShutterFeedbackSelected("HAPTIC_ONLY") }, Modifier.weight(1f))
-                                            LightSelectPill("Silent", shutterFeedback == "SILENT", { onShutterFeedbackSelected("SILENT") }, Modifier.weight(1f))
-                                        }
-                                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        Text("Anti-Banding (Flicker Reduction)", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            LightSelectPill("Auto", antibandingMode == "AUTO", { onAntibandingModeSelected("AUTO") }, Modifier.weight(1f))
-                                            LightSelectPill("50 Hz", antibandingMode == "50HZ", { onAntibandingModeSelected("50HZ") }, Modifier.weight(1f))
-                                            LightSelectPill("60 Hz", antibandingMode == "60HZ", { onAntibandingModeSelected("60HZ") }, Modifier.weight(1f))
-                                            LightSelectPill("Off", antibandingMode == "OFF", { onAntibandingModeSelected("OFF") }, Modifier.weight(1f))
-                                        }
-                                    }
-                                }
-                            }
+                }
 
-                            // 2. PHOTO
-                            SettingsSubPage.PHOTO -> {
-                                item {
-                                    SettingsSectionCard(title = "Photo Capture & Quality") {
-                                        LightToggleRow(
-                                            title = "Refocus Photo",
-                                            subtitle = "Multi-plane capture for interactive post-capture focus & 3D parallax",
-                                            isChecked = isRefocusPhotoEnabled,
-                                            onToggle = { onRefocusPhotoToggle(!isRefocusPhotoEnabled) }
-                                        )
-                                        if (isRefocusPhotoEnabled) {
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = "Focus Frames to Capture",
-                                                    fontSize = 13.5.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = Color(0xFF1F2937)
-                                                )
-                                                Text(
-                                                    text = "$refocusFrameCount Frames",
-                                                    fontSize = 13.5.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = Color(0xFF007AFF)
-                                                )
-                                            }
-                                            Text(
-                                                text = "Captures $refocusFrameCount different focus planes in a single click (5 to 20 frames)",
-                                                fontSize = 11.5.sp,
-                                                color = Color(0xFF6B7280)
-                                            )
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                            ) {
-                                                listOf(5, 8, 10, 15, 20).forEach { count ->
-                                                    LightSelectPill(
-                                                        label = "${count}F",
-                                                        isSelected = refocusFrameCount == count,
-                                                        onClick = { onRefocusFrameCountChange(count) },
-                                                        modifier = Modifier.weight(1f)
-                                                    )
-                                                }
-                                            }
-                                            Slider(
-                                                value = refocusFrameCount.toFloat(),
-                                                onValueChange = { onRefocusFrameCountChange(it.toInt()) },
-                                                valueRange = 5f..20f,
-                                                steps = 14,
-                                                modifier = Modifier.fillMaxWidth(),
-                                                colors = SliderDefaults.colors(
-                                                    thumbColor = Color(0xFF007AFF),
-                                                    activeTrackColor = Color(0xFF007AFF),
-                                                    inactiveTrackColor = Color(0xFFE5E7EB)
-                                                )
-                                            )
-                                        }
-                                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        LightToggleRow(
-                                            title = "50MP Computational Mode",
-                                            subtitle = "Single-frame native sensor capture with detail synthesis",
-                                            isChecked = photoMegapixelMode == PhotoMegapixelMode.M50,
-                                            onToggle = {
-                                                val next = if (photoMegapixelMode == PhotoMegapixelMode.M50) PhotoMegapixelMode.M12 else PhotoMegapixelMode.M50
-                                                onPhotoMegapixelModeSelected(next)
-                                            }
-                                        )
-                                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        if (capabilities.supportsRaw) {
-                                            LightToggleRow(
-                                                title = "RAW (DNG) Sensor Capture",
-                                                subtitle = "Saves uncompressed 16-bit linear sensor DNG alongside JPEG",
-                                                isChecked = isRawEnabled,
-                                                onToggle = { onRawToggle() }
-                                            )
-                                            HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        }
-                                        Text("JPEG Compression Quality", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            LightSelectPill("100% Super Fine", jpegQuality == 100, { onJpegQualitySelected(100) }, Modifier.weight(1f))
-                                            LightSelectPill("95% Fine", jpegQuality == 95, { onJpegQualitySelected(95) }, Modifier.weight(1f))
-                                            LightSelectPill("85% Standard", jpegQuality == 85, { onJpegQualitySelected(85) }, Modifier.weight(1f))
-                                        }
-                                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        Text("Color Style Preset", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            PhotoFilter.entries.take(4).forEach { filter ->
-                                                LightSelectPill(filter.displayName, selectedPhotoFilter == filter, { onPhotoFilterSelected(filter) }, Modifier.weight(1f))
-                                            }
-                                        }
-                                    }
-                                }
+                // 4. CONTROLS & GESTURES
+                if (selectedFilterCategory == FlagshipCategory.ALL || selectedFilterCategory == FlagshipCategory.CONTROLS) {
+                    item {
+                        FlagshipSectionHeader("CONTROLS & GESTURES")
+                        FlagshipCard {
+                            // Save Selfie As Previewed
+                            FlagshipSwitchItem(
+                                icon = Icons.Outlined.FlipCameraAndroid,
+                                title = "Save Selfie As Previewed",
+                                subtitle = "Mirror front camera photos",
+                                checked = saveSelfieAsPreviewed,
+                                onCheckedChange = onSaveSelfieAsPreviewedToggle
+                            )
 
-                                item {
-                                    SettingsSectionCard(title = "Custom Image Processing Pipeline (ISP)") {
-                                        LightToggleRow(
-                                            title = "Enable Sensor Pipeline",
-                                            subtitle = "Processes RAW/YUV direct sensor data before JPEG encoding (NOT filters)",
-                                            isChecked = isCustomPipelineEnabled,
-                                            onToggle = { onCustomPipelineToggle(!isCustomPipelineEnabled) }
-                                        )
-                                        if (isCustomPipelineEnabled) {
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            Text(
-                                                text = "Camera ISP Tuning Preset",
-                                                fontSize = 13.5.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = Color(0xFF1F2937)
-                                            )
-                                            Text(
-                                                text = "Subtle hardware-level processing profiles preserving natural realism",
-                                                fontSize = 11.5.sp,
-                                                color = Color(0xFF6B7280)
-                                            )
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                            ) {
-                                                com.example.camera.pipeline.model.PipelinePreset.BUILT_IN_PRESETS.take(4).forEach { p ->
-                                                    LightSelectPill(
-                                                        label = p.displayName,
-                                                        isSelected = activePipelinePreset.id == p.id,
-                                                        onClick = { onSelectPipelinePreset(p) },
-                                                        modifier = Modifier.weight(1f)
-                                                    )
-                                                }
-                                            }
-                                            Spacer(modifier = Modifier.height(6.dp))
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                            ) {
-                                                Button(
-                                                    onClick = onOpenPipelineStudio,
-                                                    colors = ButtonDefaults.buttonColors(
-                                                        containerColor = Color(0xFFE5A93B),
-                                                        contentColor = Color.Black
-                                                    ),
-                                                    modifier = Modifier.weight(1f)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Tune,
-                                                        contentDescription = null,
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
-                                                    Spacer(modifier = Modifier.width(4.dp))
-                                                    Text("Fine-tune Studio", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                                }
+                            FlagshipDivider()
 
-                                                OutlinedButton(
-                                                    onClick = onOpenBeforeAfter,
-                                                    modifier = Modifier.weight(1f),
-                                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF1F2937))
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.AutoMirrored.Filled.CompareArrows,
-                                                        contentDescription = null,
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
-                                                    Spacer(modifier = Modifier.width(4.dp))
-                                                    Text("Before / After", fontSize = 12.sp)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 3. FEATURES (High-Quality Computational Zoom Engine)
-                            SettingsSubPage.FEATURES -> {
-                                item {
-                                    SettingsSectionCard(title = "High-Quality Zoom Engine") {
-                                        LightToggleRow(
-                                            title = "High-Quality Zoom Processing",
-                                            subtitle = "Enhances 2×, 5×, and 10× zoom clarity using multi-frame alignment, Lanczos-3 interpolation, and halo-clamped detail recovery",
-                                            isChecked = isHighQualityZoomEnabled
-                                        ) {
-                                            onHighQualityZoomToggle(!isHighQualityZoomEnabled)
-                                        }
-
-                                        if (isHighQualityZoomEnabled) {
-                                            Spacer(modifier = Modifier.height(10.dp))
-                                            HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                            Spacer(modifier = Modifier.height(8.dp))
-
-                                            Text(
-                                                text = "Clarity & Detail Level",
-                                                fontSize = 13.5.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = Color(0xFF1F2937)
-                                            )
-                                            Text(
-                                                text = "Controls the multi-frame alignment depth and detail recovery intensity for zoomed photos.",
-                                                fontSize = 11.5.sp,
-                                                color = Color(0xFF6B7280)
-                                            )
-                                            Spacer(modifier = Modifier.height(8.dp))
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                            ) {
-                                                com.example.camera.zoom.ZoomProcessingQuality.entries.forEach { q ->
-                                                    LightSelectPill(
-                                                        label = q.label,
-                                                        isSelected = zoomProcessingQuality == q,
-                                                        onClick = { onZoomProcessingQualitySelect(q) },
-                                                        modifier = Modifier.weight(1f)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                item {
-                                    SettingsSectionCard(title = "Computational Zoom Pipeline") {
-                                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = "Multi-Frame Sub-Pixel Fusion",
-                                                    fontSize = 13.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = Color(0xFF1F2937)
-                                                )
-                                                Surface(
-                                                    shape = RoundedCornerShape(4.dp),
-                                                    color = Color(0xFFEFF6FF)
-                                                ) {
-                                                    Text(
-                                                        text = "SNR Boost",
-                                                        fontSize = 10.5.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = Color(0xFF2563EB),
-                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                    )
-                                                }
-                                            }
-                                            Text(
-                                                text = "Calculates cross-correlation displacement across frames with photometric outlier rejection to cancel digital noise without waxy blurring.",
-                                                fontSize = 11.sp,
-                                                color = Color(0xFF6B7280)
-                                            )
-
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                            Spacer(modifier = Modifier.height(4.dp))
-
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = "Separable 2D Lanczos-3 Sinc",
-                                                    fontSize = 13.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = Color(0xFF1F2937)
-                                                )
-                                                Surface(
-                                                    shape = RoundedCornerShape(4.dp),
-                                                    color = Color(0xFFF0FDF4)
-                                                ) {
-                                                    Text(
-                                                        text = "Windowed Sinc",
-                                                        fontSize = 10.5.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = Color(0xFF16A34A),
-                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                    )
-                                                }
-                                            }
-                                            Text(
-                                                text = "Reconstructs sub-pixel frequency content with a 6-tap sinc kernel for sharp edges and legible distant text.",
-                                                fontSize = 11.sp,
-                                                color = Color(0xFF6B7280)
-                                            )
-
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                            Spacer(modifier = Modifier.height(4.dp))
-
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = "Halo-Clamped Detail Recovery",
-                                                    fontSize = 13.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = Color(0xFF1F2937)
-                                                )
-                                                Surface(
-                                                    shape = RoundedCornerShape(4.dp),
-                                                    color = Color(0xFFFAF5FF)
-                                                ) {
-                                                    Text(
-                                                        text = "Natural Texture",
-                                                        fontSize = 10.5.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = Color(0xFF7C3AED),
-                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                    )
-                                                }
-                                            }
-                                            Text(
-                                                text = "Adaptive unsharp deblurring with dynamic 3x3 min/max clipping guarantees zero ringing halos or artificial contours.",
-                                                fontSize = 11.sp,
-                                                color = Color(0xFF6B7280)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                            SettingsSubPage.VIDEO -> {
-                                item {
-                                    SettingsSectionCard(title = "Video Quality & Recording") {
-                                        Text("Frame Rate (FPS)", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            LightSelectPill("24 FPS (Cinema)", videoFps == 24, { onVideoFpsSelected(24) }, Modifier.weight(1f))
-                                            LightSelectPill("30 FPS", videoFps == 30, { onVideoFpsSelected(30) }, Modifier.weight(1f))
-                                            LightSelectPill("60 FPS", videoFps == 60, { onVideoFpsSelected(60) }, Modifier.weight(1f))
-                                        }
-                                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        Text("Bitrate Encoding Profile", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        VideoBitrateOption.entries.forEach { option ->
-                                            val desc = if (option.bps > 0) "${option.bps / 1_000_000} Mbps target bitrate" else "Device recommended default"
-                                            LightOptionRow(option.title, desc, videoBitrate == option) { onVideoBitrateSelected(option) }
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                        }
-                                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        LightToggleRow(
-                                            title = "Video Stabilization",
-                                            subtitle = "Reduces handheld shake using electronic image stabilization",
-                                            isChecked = isVideoStabilizationEnabled,
-                                            onToggle = { onStabilizationToggle(!isVideoStabilizationEnabled) }
+                            // Volume Key Action
+                            FlagshipRowItem(
+                                icon = Icons.Outlined.VolumeUp,
+                                title = "Volume Key Action",
+                                subtitle = volumeKeyAction
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf("SHUTTER", "ZOOM", "VOLUME").forEach { action ->
+                                        FlagshipSmallChip(
+                                            label = action,
+                                            isSelected = volumeKeyAction == action,
+                                            onClick = { onVolumeKeyActionSelected(action) }
                                         )
                                     }
                                 }
                             }
 
-                            // 4. CINEMA
-                            SettingsSubPage.CINEMA -> {
-                                item {
-                                    SettingsSectionCard(title = "Cinema & 10-Bit Log Engine") {
-                                        Text("Log Bit Depth", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            LogBitDepth.entries.forEach { depth ->
-                                                LightSelectPill(depth.label, cinemaConfig.logBitDepth == depth, { onCinemaConfigChange(cinemaConfig.copy(logBitDepth = depth)) }, Modifier.weight(1f))
-                                            }
-                                        }
-                                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        Text("Color Profile", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        CinemaColorProfile.entries.forEach { prof ->
-                                            LightOptionRow(prof.label, prof.description, cinemaConfig.colorProfile == prof) { onCinemaConfigChange(cinemaConfig.copy(colorProfile = prof)) }
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                        }
-                                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        LightToggleRow("Focus Peaking Overlay", "Highlights sharp edges in real-time", cinemaConfig.isFocusPeakingEnabled) {
-                                            onCinemaConfigChange(cinemaConfig.copy(isFocusPeakingEnabled = !cinemaConfig.isFocusPeakingEnabled))
-                                        }
-                                        LightToggleRow("Live Waveform Monitor", "Displays real-time luminance histogram", cinemaConfig.isWaveformEnabled) {
-                                            onCinemaConfigChange(cinemaConfig.copy(isWaveformEnabled = !cinemaConfig.isWaveformEnabled))
-                                        }
-                                    }
-                                }
-                            }
+                            FlagshipDivider()
 
-                            // 5. LENS
-                            SettingsSubPage.LENS -> {
-                                item {
-                                    SettingsSectionCard(title = "Optical Lens System") {
-                                        Text("Active Camera Lens", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        availableLenses.forEach { lens ->
-                                            val lensTypeStr = when (lens.lensType) {
-                                                LensType.ULTRAWIDE -> "Ultra-Wide"
-                                                LensType.TELEPHOTO, LensType.TELEPHOTO_3X -> "Telephoto"
-                                                LensType.MACRO -> "Macro"
-                                                LensType.FRONT -> "Front Selfie"
-                                                else -> "Main Wide"
-                                            }
-                                            LightOptionRow(
-                                                title = "${lens.displayName} (Camera ${lens.cameraId})",
-                                                subtitle = "Focal length ${lens.focalLengthMm}mm · f/${lens.maxAperture} · $lensTypeStr",
-                                                isSelected = selectedLens?.id == lens.id
-                                            ) { onLensSelected(lens) }
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                        }
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Button(
-                                            onClick = onForceDeepScan,
-                                            modifier = Modifier.fillMaxWidth(),
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A73E8))
-                                        ) {
-                                            Icon(Icons.Outlined.Search, null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text("Deep Scan Auxiliary Lenses")
-                                        }
-                                    }
-                                }
-
-                                item {
-                                    SettingsSectionCard(title = "Instant Camera Switching (Motorola Optimized)") {
-                                        // Hardware Profile Header Banner
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(Color(0xFFE8F0FE))
-                                                .padding(horizontal = 12.dp, vertical = 10.dp)
-                                        ) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.ElectricBolt,
-                                                    contentDescription = null,
-                                                    tint = Color(0xFF1A73E8),
-                                                    modifier = Modifier.size(22.dp)
-                                                )
-                                                Column {
-                                                    Text(
-                                                        text = if (instantSwitchState.isMotorolaDevice) {
-                                                            "Motorola Hardware Profile: Optimized"
-                                                        } else {
-                                                            "Motorola Dual-Camera Pipeline Engine"
-                                                        },
-                                                        fontSize = 12.5.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = Color(0xFF1A73E8)
-                                                    )
-                                                    Text(
-                                                        text = instantSwitchState.statusMessage,
-                                                        fontSize = 11.sp,
-                                                        color = Color(0xFF3C4043)
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        Spacer(modifier = Modifier.height(12.dp))
-                                        Text(
-                                            text = "Ultra-Wide",
-                                            fontSize = 13.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF1F2937)
-                                        )
-
-                                        LightToggleRow(
-                                            title = "Keep Ultra-Wide Ready",
-                                            subtitle = "When enabled, while using 1× camera, keeps the ultra-wide running quietly in the background so it is already ready when selected.",
-                                            isChecked = instantSwitchState.isKeepUltraWideReady,
-                                            onToggle = { onKeepUltraWideReadyToggle(!instantSwitchState.isKeepUltraWideReady) }
-                                        )
-
-                                        LightToggleRow(
-                                            title = "Show Ultra-Wide Little Preview",
-                                            subtitle = "When enabled, shows a small live preview of the background ultra-wide camera while using 1×. Tap the preview window to switch immediately.",
-                                            isChecked = instantSwitchState.isShowUltraWidePreview,
-                                            onToggle = { onShowUltraWidePreviewToggle(!instantSwitchState.isShowUltraWidePreview) }
-                                        )
-
-                                        Spacer(modifier = Modifier.height(10.dp))
-                                        HorizontalDivider(color = Color(0xFFE5E7EB))
-                                        Spacer(modifier = Modifier.height(10.dp))
-
-                                        Text(
-                                            text = "Front Camera",
-                                            fontSize = 13.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF1F2937)
-                                        )
-
-                                        LightToggleRow(
-                                            title = "Keep Front Camera Ready",
-                                            subtitle = "When enabled, keeps the front camera prepared in the background while using the rear camera for minimum possible delay.",
-                                            isChecked = instantSwitchState.isKeepFrontCameraReady,
-                                            onToggle = { onKeepFrontCameraReadyToggle(!instantSwitchState.isKeepFrontCameraReady) }
-                                        )
-
-                                        LightToggleRow(
-                                            title = "Show Front Camera Little Preview",
-                                            subtitle = "When enabled, shows a small live preview of the front camera while using the rear camera.",
-                                            isChecked = instantSwitchState.isShowFrontCameraPreview,
-                                            onToggle = { onShowFrontCameraPreviewToggle(!instantSwitchState.isShowFrontCameraPreview) }
-                                        )
-
-                                        Spacer(modifier = Modifier.height(10.dp))
-                                        Text(
-                                            text = "Motorola Reliability: The Ready and Little Preview options work independently. If simultaneous background camera operation is unsupported on a particular Motorola model or firmware version, the fastest normal switching method is automatically used without causing crashes.",
-                                            fontSize = 11.sp,
-                                            color = Color(0xFF6B7280),
-                                            lineHeight = 15.sp
+                            // Double-Tap Action
+                            FlagshipRowItem(
+                                icon = Icons.Outlined.TouchApp,
+                                title = "Double-Tap Action",
+                                subtitle = if (doubleTapAction == "FLIP") "Switch Front/Rear" else doubleTapAction
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf("FLIP", "ZOOM", "NONE").forEach { act ->
+                                        FlagshipSmallChip(
+                                            label = act,
+                                            isSelected = doubleTapAction == act,
+                                            onClick = { onDoubleTapActionSelected(act) }
                                         )
                                     }
                                 }
                             }
 
-                            // 6. ZOOM
-                            SettingsSubPage.ZOOM -> {
-                                item {
-                                    SettingsSectionCard(title = "Zoom Controls & Stabilization") {
-                                        Text("Quick Zoom Presets", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            listOf(0.5f, 1.0f, 2.0f, 5.0f, 10.0f).forEach { zoom ->
-                                                LightSelectPill("${if (zoom < 1f) ".5" else "${zoom.toInt()}x"}", (currentZoom - zoom).let { it >= -0.1f && it <= 0.1f }, { onZoomChange(zoom) }, Modifier.weight(1f))
-                                            }
-                                        }
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Text("Fine Zoom Scrubbing: %.1fx".format(currentZoom), fontSize = 13.sp, color = Color(0xFF4B5563))
-                                        Slider(
-                                            value = currentZoom,
-                                            onValueChange = { onZoomChange(it) },
-                                            valueRange = 0.5f..10.0f
+                            FlagshipDivider()
+
+                            // Shutter Feedback
+                            FlagshipRowItem(
+                                icon = Icons.Outlined.Vibration,
+                                title = "Shutter Feedback",
+                                subtitle = shutterFeedback.replace("_", " ")
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf("SOUND_AND_HAPTIC", "HAPTIC_ONLY", "SILENT").forEach { mode ->
+                                        FlagshipSmallChip(
+                                            label = when (mode) {
+                                                "SOUND_AND_HAPTIC" -> "Both"
+                                                "HAPTIC_ONLY" -> "Haptic"
+                                                else -> "Silent"
+                                            },
+                                            isSelected = shutterFeedback == mode,
+                                            onClick = { onShutterFeedbackSelected(mode) }
                                         )
                                     }
                                 }
                             }
 
-                            // 7. FOCUS
-                            SettingsSubPage.FOCUS -> {
-                                item {
-                                    SettingsSectionCard(title = "Focus & Tracking System") {
-                                        LightToggleRow("Tap to Focus & Meter", "Locks focus reticle where you touch the preview", tapFocusConfig.isTapToFocusEnabled) {
-                                            onTapFocusConfigChange(tapFocusConfig.copy(isTapToFocusEnabled = !tapFocusConfig.isTapToFocusEnabled))
-                                        }
-                                        LightToggleRow("AE/AF Lock on Hold", "Locks exposure and focus indefinitely on long-press", tapFocusConfig.isAeAfLockEnabled) {
-                                            onTapFocusConfigChange(tapFocusConfig.copy(isAeAfLockEnabled = !tapFocusConfig.isAeAfLockEnabled))
-                                        }
-                                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        Text("Focus Mode", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            FocusMode.entries.forEach { fm ->
-                                                LightSelectPill(fm.title, focusMode == fm, { onFocusModeChange(fm) }, Modifier.weight(1f))
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            FlagshipDivider()
 
-                            // 8. EXPOSURE
-                            SettingsSubPage.EXPOSURE -> {
-                                item {
-                                    SettingsSectionCard(title = "Exposure & Lighting") {
-                                        val evVal = exposureCompensation / 3.0f
-                                        Text("Exposure Compensation (EV: ${if (evVal >= 0f) "+%.1f".format(evVal) else "%.1f".format(evVal)})", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        Slider(
-                                            value = exposureCompensation.toFloat(),
-                                            onValueChange = { onExposureCompensationChange(it.toInt()) },
-                                            valueRange = -12f..12f,
-                                            steps = 23
+                            // Tap to Focus
+                            FlagshipSwitchItem(
+                                icon = Icons.Outlined.CenterFocusStrong,
+                                title = "Tap to Focus & Meter",
+                                subtitle = "Auto-exposure spot metering on focus target",
+                                checked = tapFocusConfig.isTapToFocusEnabled,
+                                onCheckedChange = { onTapFocusConfigChange(tapFocusConfig.copy(isTapToFocusEnabled = it)) }
+                            )
+                        }
+                    }
+                }
+
+                // 5. ADVANCED & LABS
+                if (selectedFilterCategory == FlagshipCategory.ALL || selectedFilterCategory == FlagshipCategory.ADVANCED) {
+                    item {
+                        FlagshipSectionHeader("ADVANCED & LABS")
+                        FlagshipCard {
+                            // Anti-Banding
+                            FlagshipRowItem(
+                                icon = Icons.Outlined.WbIncandescent,
+                                title = "Anti-Banding",
+                                subtitle = "Flicker reduction frequency ($antibandingMode)"
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf("AUTO", "50HZ", "60HZ").forEach { mode ->
+                                        FlagshipSmallChip(
+                                            label = mode,
+                                            isSelected = antibandingMode == mode,
+                                            onClick = { onAntibandingModeSelected(mode) }
                                         )
-                                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        Text("Manual ISO Sensitivity", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            LightSelectPill("Auto", manualIso == null, { onManualIsoChange(null) }, Modifier.weight(1f))
-                                            listOf(100, 200, 400, 800).forEach { iso ->
-                                                LightSelectPill("$iso", manualIso == iso, { onManualIsoChange(iso) }, Modifier.weight(1f))
-                                            }
-                                        }
                                     }
                                 }
                             }
 
-                            // 9. HDR
-                            SettingsSubPage.HDR -> {
-                                item {
-                                    SettingsSectionCard(title = "HDR & Dynamic Range") {
-                                        LightToggleRow("Auto HDR Capture", "Intelligently merges multi-bracket exposures in high-contrast scenes", isAutoHdrEnabled) {
-                                            onAutoHdrToggle(!isAutoHdrEnabled)
-                                        }
-                                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        Text("Night Mode Capture Duration", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            listOf(1, 2, 3, 5).forEach { sec ->
-                                                LightSelectPill("${sec}s", nightConfig.durationSeconds == sec, { onNightConfigChange(nightConfig.copy(durationSeconds = sec)) }, Modifier.weight(1f))
-                                            }
-                                        }
+                            FlagshipDivider()
+
+                            // Viewfinder Refresh Rate
+                            FlagshipRowItem(
+                                icon = Icons.Outlined.Refresh,
+                                title = "Viewfinder Refresh Rate",
+                                subtitle = "${viewfinderFps}Hz preview stream"
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf(60, 120).forEach { rate ->
+                                        FlagshipSmallChip(
+                                            label = "${rate}Hz",
+                                            isSelected = viewfinderFps == rate,
+                                            onClick = { onViewfinderFpsSelected(rate) }
+                                        )
                                     }
                                 }
                             }
 
-                            // 10. AI
-                            SettingsSubPage.AI -> {
-                                item {
-                                    SettingsSectionCard(title = "AI Smart Features & Bokeh") {
-                                        LightToggleRow("AI Subject Auto-Framing", "Automatically centers and tracks recognized subjects", isAiAutoFramingEnabled) {
-                                            onAiAutoFramingToggle(!isAiAutoFramingEnabled)
-                                        }
-                                        LightToggleRow("Optical Blur Guided Portrait", "Fuses physical lens optical defocus with depth bokeh and fine hair matting", portraitConfig.opticalBlurGuided) {
-                                            onPortraitConfigChange(portraitConfig.copy(opticalBlurGuided = !portraitConfig.opticalBlurGuided))
-                                        }
-                                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        Text("Simulated Portrait Aperture", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            listOf("f/1.4", "f/2.0", "f/2.8", "f/4.0", "f/8.0").forEach { ap ->
-                                                LightSelectPill(ap, portraitConfig.simulatedAperture == ap, { onPortraitConfigChange(portraitConfig.copy(simulatedAperture = ap)) }, Modifier.weight(1f))
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            FlagshipDivider()
 
-                            // 11. STABILIZATION
-                            SettingsSubPage.STABILIZATION -> {
-                                item {
-                                    SettingsSectionCard(title = "Stabilization Engine") {
-                                        LightToggleRow("Optical Image Stabilization (OIS)", "Physical hardware gyro actuator stabilization (Default: ON)", hybridStabilizationConfig.isOisPreferred) {
-                                            onHybridStabilizationChange(hybridStabilizationConfig.copy(isOisPreferred = !hybridStabilizationConfig.isOisPreferred))
-                                        }
-                                        LightToggleRow("Hybrid Stabilization Master", "Combines physical OIS with electronic gyroscope EIS", hybridStabilizationConfig.isHybridEnabled) {
-                                            onHybridStabilizationChange(hybridStabilizationConfig.copy(isHybridEnabled = !hybridStabilizationConfig.isHybridEnabled))
-                                        }
-                                        LightToggleRow("Ultra Steady Action Mode", "Applies aggressive sensor stabilization (OIS stays OFF if disabled)", hybridStabilizationConfig.isUltraStabilizationEnabled) {
-                                            onHybridStabilizationChange(hybridStabilizationConfig.copy(isUltraStabilizationEnabled = !hybridStabilizationConfig.isUltraStabilizationEnabled))
-                                        }
-                                    }
-                                }
-                            }
+                            // Thermal ISP Protection
+                            FlagshipSwitchItem(
+                                icon = Icons.Outlined.Thermostat,
+                                title = "Thermal Protection",
+                                subtitle = "Dynamically throttle ISP load during overheating",
+                                checked = thermalProtection,
+                                onCheckedChange = onThermalProtectionToggle
+                            )
 
-                            // 12. CODEC
-                            SettingsSubPage.CODEC -> {
-                                item {
-                                    SettingsSectionCard(title = "Video & Audio Codecs") {
-                                        Text("Video Compression Format", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        LightOptionRow("HEVC / H.265 (High Efficiency)", "Up to 50% smaller file sizes, enables 10-bit color recording", videoCodec == "HEVC") {
-                                            onVideoCodecSelected("HEVC")
-                                        }
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        LightOptionRow("H.264 / AVC (Most Compatible)", "Standard video format supported by all players and legacy devices", videoCodec == "H.264") {
-                                            onVideoCodecSelected("H.264")
-                                        }
-                                    }
-                                }
-                            }
+                            FlagshipDivider()
 
-                            // 13. RESOLUTION_FPS
-                            SettingsSubPage.RESOLUTION_FPS -> {
-                                item {
-                                    SettingsSectionCard(title = "Resolution & Framerate Matrix") {
-                                        Text("Photo Resolution", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        capabilities.supportedPhotoResolutions.take(4).forEach { res ->
-                                            LightOptionRow("${res.width} x ${res.height}", "%.1f MP (%s)".format(res.megapixels, res.aspectRatioLabel), selectedPhotoResolution == res) {
-                                                onPhotoResolutionSelected(res)
-                                            }
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                        }
-                                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        Text("Video Resolution", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        capabilities.supportedVideoResolutions.take(4).forEach { res ->
-                                            LightOptionRow("${res.width} x ${res.height}", "${res.aspectRatioLabel} Video", selectedVideoResolution == res) {
-                                                onVideoResolutionSelected(res)
-                                            }
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                        }
-                                    }
-                                }
-                            }
+                            // Horizon Leveler
+                            FlagshipSwitchItem(
+                                icon = Icons.Outlined.ScreenRotation,
+                                title = "Tilt Horizon Leveler",
+                                subtitle = "Sensor gyroscope alignment indicator",
+                                checked = horizonLeveler,
+                                onCheckedChange = onHorizonLevelerToggle
+                            )
+                        }
+                    }
+                }
 
-                            // 14. AUDIO
-                            SettingsSubPage.AUDIO -> {
-                                item {
-                                    SettingsSectionCard(title = "Audio Recording & Input") {
-                                        LightToggleRow("Record Audio with Video", "Enables microphone track during video recording", isAudioEnabled) {
-                                            onAudioToggle()
-                                        }
-                                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        LightToggleRow("Wind Noise Reduction", "Filters low-frequency rumble outdoors", windNoiseReduction) {
-                                            onWindNoiseReductionToggle(!windNoiseReduction)
-                                        }
-                                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        Text("Audio Source", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            LightSelectPill("Camcorder Built-in", audioSource == "CAMCORDER", { onAudioSourceSelected("CAMCORDER") }, Modifier.weight(1f))
-                                            LightSelectPill("Stereo Mic Array", audioSource == "MIC", { onAudioSourceSelected("MIC") }, Modifier.weight(1f))
-                                        }
-                                    }
-                                }
-                            }
+                // 6. GENERAL / ABOUT
+                if (selectedFilterCategory == FlagshipCategory.ALL || selectedFilterCategory == FlagshipCategory.ABOUT) {
+                    item {
+                        FlagshipSectionHeader("GENERAL / ABOUT")
+                        FlagshipCard {
+                            // Camera HAL Info
+                            FlagshipRowItem(
+                                icon = Icons.Outlined.Info,
+                                title = "Hardware Support",
+                                subtitle = "Camera2 API · ${availableLenses.size} detected lenses · ${if (capabilities.supportsRaw) "RAW supported" else "Standard ISP"}"
+                            )
 
-                            // 15. GRID
-                            SettingsSubPage.GRID -> {
-                                item {
-                                    SettingsSectionCard(title = "Grid Lines & Composition") {
-                                        Text("Viewfinder Framing Grid", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        GridType.entries.forEach { grid ->
-                                            LightOptionRow(grid.title, "Framing reference lines", gridType == grid) {
-                                                onGridTypeSelected(grid)
-                                            }
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                        }
-                                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        LightToggleRow("Horizon Tilt Leveler", "Shows real-time horizon pitch indicator to prevent tilted shots", horizonLeveler) {
-                                            onHorizonLevelerToggle(!horizonLeveler)
-                                        }
-                                    }
-                                }
-                            }
+                            FlagshipDivider()
 
-                            // 16. GESTURE
-                            SettingsSubPage.GESTURE -> {
-                                item {
-                                    SettingsSectionCard(title = "Hardware Buttons & Gestures") {
-                                        Text("Volume Key Action", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            LightSelectPill("Shutter", volumeKeyAction == "SHUTTER", { onVolumeKeyActionSelected("SHUTTER") }, Modifier.weight(1f))
-                                            LightSelectPill("Zoom", volumeKeyAction == "ZOOM", { onVolumeKeyActionSelected("ZOOM") }, Modifier.weight(1f))
-                                            LightSelectPill("Volume", volumeKeyAction == "VOLUME", { onVolumeKeyActionSelected("VOLUME") }, Modifier.weight(1f))
-                                        }
-                                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        Text("Double-Tap Screen Action", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            LightSelectPill("Flip Camera", doubleTapAction == "FLIP", { onDoubleTapActionSelected("FLIP") }, Modifier.weight(1f))
-                                            LightSelectPill("2x Zoom", doubleTapAction == "ZOOM_2X", { onDoubleTapActionSelected("ZOOM_2X") }, Modifier.weight(1f))
-                                            LightSelectPill("None", doubleTapAction == "NONE", { onDoubleTapActionSelected("NONE") }, Modifier.weight(1f))
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 17. UI_CUSTOMIZATION
-                            SettingsSubPage.UI_CUSTOMIZATION -> {
-                                item {
-                                    Surface(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        shape = RoundedCornerShape(16.dp),
-                                        color = Color(0xFF1E222D),
-                                        border = BorderStroke(1.5.dp, Color(0xFF2563EB))
+                            // Reset Settings
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { showResetDialog = true }
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(30.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF2C1515)),
+                                        contentAlignment = Alignment.Center
                                     ) {
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(16.dp)
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(42.dp)
-                                                        .clip(RoundedCornerShape(10.dp))
-                                                        .background(Color(0xFF2563EB).copy(alpha = 0.2f)),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Outlined.Smartphone,
-                                                        contentDescription = null,
-                                                        tint = Color(0xFF60A5FA),
-                                                        modifier = Modifier.size(24.dp)
-                                                    )
-                                                }
-                                                Spacer(modifier = Modifier.width(12.dp))
-                                                Column(modifier = Modifier.weight(1f)) {
-                                                    Text(
-                                                        text = "Custom UI Studio",
-                                                        fontSize = 16.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = Color.White
-                                                    )
-                                                    Text(
-                                                        text = "Simulated device preview · Full text & icon styling · Upload any UI photo",
-                                                        fontSize = 11.5.sp,
-                                                        color = Color.White.copy(alpha = 0.7f)
-                                                    )
-                                                }
-                                            }
-
-                                            Spacer(modifier = Modifier.height(12.dp))
-
-                                            Button(
-                                                onClick = onOpenCustomUiStudio,
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(44.dp),
-                                                shape = RoundedCornerShape(10.dp),
-                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Outlined.DesignServices,
-                                                    contentDescription = null,
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                Text(
-                                                    text = "Open Custom UI Studio & Simulator",
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = Color.White,
-                                                    fontSize = 13.5.sp
-                                                )
-                                            }
-                                        }
+                                        Icon(
+                                            imageVector = Icons.Outlined.RestartAlt,
+                                            contentDescription = null,
+                                            tint = Color(0xFFEF4444),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                    Column {
+                                        Text(
+                                            text = "Reset All Settings",
+                                            color = Color(0xFFEF4444),
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = "Restore camera parameters to factory defaults",
+                                            color = Color(0xFF9CA3AF),
+                                            fontSize = 11.sp
+                                        )
                                     }
                                 }
-
-                                item {
-                                    SettingsSectionCard(title = "Camera UI Design Templates") {
-                                        Text("Choose from 9 completely unique design languages:", fontSize = 12.sp, color = Color(0xFF6B7280))
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        UiTemplateType.entries.forEach { template ->
-                                            val isSel = uiCustomizationState.selectedTemplate == template
-                                            if (template == UiTemplateType.CUSTOM) {
-                                                Surface(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .padding(vertical = 3.dp),
-                                                    shape = RoundedCornerShape(12.dp),
-                                                    color = if (isSel) Color(0xFFEFF6FF) else Color.White,
-                                                    border = BorderStroke(
-                                                        if (isSel) 1.5.dp else 1.dp,
-                                                        if (isSel) Color(0xFF2563EB) else Color(0xFFE5E7EB)
-                                                    )
-                                                ) {
-                                                    Row(
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .clickable {
-                                                                onSelectTemplate(UiTemplateType.CUSTOM)
-                                                                onOpenCustomUiStudio()
-                                                            }
-                                                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                                                        verticalAlignment = Alignment.CenterVertically
-                                                    ) {
-                                                        Column(modifier = Modifier.weight(1f)) {
-                                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                                Text(
-                                                                    text = template.title,
-                                                                    fontWeight = FontWeight.Bold,
-                                                                    fontSize = 14.sp,
-                                                                    color = if (isSel) Color(0xFF1D4ED8) else Color(0xFF1F2937)
-                                                                )
-                                                                Spacer(modifier = Modifier.width(6.dp))
-                                                                Surface(
-                                                                    shape = RoundedCornerShape(4.dp),
-                                                                    color = Color(0xFF2563EB).copy(alpha = 0.15f)
-                                                                ) {
-                                                                    Text(
-                                                                        text = "STUDIO",
-                                                                        fontSize = 9.sp,
-                                                                        fontWeight = FontWeight.Bold,
-                                                                        color = Color(0xFF2563EB),
-                                                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                                                                    )
-                                                                }
-                                                            }
-                                                            Text(
-                                                                text = template.subtitle,
-                                                                fontSize = 11.5.sp,
-                                                                color = Color(0xFF6B7280)
-                                                            )
-                                                        }
-                                                        Button(
-                                                            onClick = onOpenCustomUiStudio,
-                                                            shape = RoundedCornerShape(8.dp),
-                                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                                            modifier = Modifier.height(32.dp)
-                                                        ) {
-                                                            Text("Customize", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                                                        }
-                                                    }
-                                                }
-                                            } else {
-                                                LightOptionRow(
-                                                    title = template.title,
-                                                    subtitle = template.subtitle,
-                                                    isSelected = isSel
-                                                ) {
-                                                    onSelectTemplate(template)
-                                                }
-                                            }
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                        }
-                                    }
-                                }
-
-                                item {
-                                    SettingsSectionCard(title = "Top Icon Styles") {
-                                        Text("Select a distinct visual style for top controls:", fontSize = 12.sp, color = Color(0xFF6B7280))
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        IconStyleOption.entries.forEach { style ->
-                                            val isSel = uiCustomizationState.globalConfig.iconStyleOption == style
-                                            Surface(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(vertical = 3.dp),
-                                                shape = RoundedCornerShape(10.dp),
-                                                color = if (isSel) Color(0xFFEFF6FF) else Color.White,
-                                                border = BorderStroke(
-                                                    if (isSel) 1.5.dp else 1.dp,
-                                                    if (isSel) Color(0xFF2563EB) else Color(0xFFE5E7EB)
-                                                )
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .clickable {
-                                                            val newConfig = uiCustomizationState.globalConfig.copy(iconStyleOption = style)
-                                                            onUpdateGlobalLayoutConfig(newConfig)
-                                                            CameraMode.entries.forEach { mode ->
-                                                                val modeConf = uiCustomizationState.getConfigForMode(mode)
-                                                                onUpdateModeLayoutConfig(mode, modeConf.copy(iconStyleOption = style))
-                                                            }
-                                                        }
-                                                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Column(modifier = Modifier.weight(1f)) {
-                                                        Text(
-                                                            text = style.label,
-                                                            fontWeight = FontWeight.Bold,
-                                                            fontSize = 13.5.sp,
-                                                            color = if (isSel) Color(0xFF1D4ED8) else Color(0xFF1F2937)
-                                                        )
-                                                        Text(
-                                                            text = style.description,
-                                                            fontSize = 11.5.sp,
-                                                            color = Color(0xFF6B7280)
-                                                        )
-                                                    }
-                                                    RadioButton(
-                                                        selected = isSel,
-                                                        onClick = {
-                                                            val newConfig = uiCustomizationState.globalConfig.copy(iconStyleOption = style)
-                                                            onUpdateGlobalLayoutConfig(newConfig)
-                                                            CameraMode.entries.forEach { mode ->
-                                                                val modeConf = uiCustomizationState.getConfigForMode(mode)
-                                                                onUpdateModeLayoutConfig(mode, modeConf.copy(iconStyleOption = style))
-                                                            }
-                                                        },
-                                                        colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF2563EB))
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                                Icon(
+                                    imageVector = Icons.Default.ChevronRight,
+                                    contentDescription = null,
+                                    tint = Color(0xFF6B7280),
+                                    modifier = Modifier.size(16.dp)
+                                )
                             }
-
-                            // 18. PERFORMANCE
-                            SettingsSubPage.PERFORMANCE -> {
-                                item {
-                                    SettingsSectionCard(title = "Performance & Battery Optimization") {
-                                        Text("Viewfinder Preview Refresh Rate", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1F2937))
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            LightSelectPill("60 FPS (Smooth)", viewfinderFps == 60, { onViewfinderFpsSelected(60) }, Modifier.weight(1f))
-                                            LightSelectPill("30 FPS (Battery Saver)", viewfinderFps == 30, { onViewfinderFpsSelected(30) }, Modifier.weight(1f))
-                                        }
-                                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                                        LightToggleRow("Thermal Throttling Protection", "Gracefully lowers sensor frame rate when phone heats up", thermalProtection) {
-                                            onThermalProtectionToggle(!thermalProtection)
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 19. ADVANCED
-                            SettingsSubPage.ADVANCED -> {
-                                item {
-                                    SettingsSectionCard(title = "Camera2 HAL Diagnostics & Reset") {
-                                        val hwLevel = if (capabilities.supportsManualSensor) "Full Hardware Camera2 (Level 3 / Full)" else "Limited Hardware Camera2"
-                                        LightSpecItem("Camera2 Hardware Level", hwLevel)
-                                        LightSpecItem("Auxiliary Camera Lenses", "${availableLenses.size} detected")
-                                        LightSpecItem("RAW Sensor Capture", if (capabilities.supportsRaw) "Supported" else "Not Available")
-                                        LightSpecItem("Optical Stabilization (OIS)", if (capabilities.supportsOis) "Physical Gyro Present" else "Electronic Only")
-                                        Spacer(modifier = Modifier.height(12.dp))
-                                        Button(
-                                            onClick = onResetAllSettings,
-                                            modifier = Modifier.fillMaxWidth(),
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
-                                        ) {
-                                            Icon(Icons.Outlined.RestartAlt, null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text("Reset All Camera Settings to Defaults")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        item {
-                            Spacer(modifier = Modifier.height(28.dp))
                         }
                     }
                 }
             }
         }
     }
-}
 
-@Composable
-private fun SettingsCategoryTile(
-    page: SettingsSubPage,
-    summary: String,
-    onClick: () -> Unit
-) {
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = Color.White,
-        border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .testTag("settings_tile_${page.name.lowercase()}")
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFE8F0FE)),
-                    contentAlignment = Alignment.Center
+    if (showResetDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetDialog = false },
+            containerColor = Color(0xFF1C1D22),
+            title = {
+                Text(
+                    text = "Reset Settings?",
+                    color = Color.White,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "This will restore all photo, video, processing, and control preferences back to factory defaults.",
+                    color = Color(0xFFD1D5DB),
+                    fontSize = 13.5.sp
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onResetAllSettings()
+                        showResetDialog = false
+                    }
                 ) {
-                    Icon(
-                        imageVector = page.icon,
-                        contentDescription = page.title,
-                        tint = Color(0xFF1A73E8),
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Text("Reset", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
                 }
-
-                Spacer(modifier = Modifier.width(14.dp))
-
-                Column {
-                    Text(
-                        text = page.title,
-                        fontSize = 14.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF111827)
-                    )
-                    Text(
-                        text = summary,
-                        fontSize = 11.5.sp,
-                        color = Color(0xFF6B7280),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetDialog = false }) {
+                    Text("Cancel", color = Color(0xFF9CA3AF))
                 }
             }
-
-            Icon(
-                imageVector = Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = Color(0xFF9CA3AF),
-                modifier = Modifier.size(18.dp)
-            )
-        }
+        )
     }
 }
 
 @Composable
-private fun SettingsSectionCard(
-    title: String,
-    content: @Composable ColumnScope.() -> Unit
-) {
+private fun FlagshipSectionHeader(title: String) {
+    Text(
+        text = title,
+        color = Color(0xFF9CA3AF),
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 1.sp,
+        modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+    )
+}
+
+@Composable
+private fun FlagshipCard(content: @Composable ColumnScope.() -> Unit) {
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = Color.White,
-        border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+        color = Color(0xFF1A1C22),
+        border = BorderStroke(1.dp, Color(0xFF272A34)),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text(
-                text = title,
-                fontSize = 14.5.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF111827)
-            )
-            content()
-        }
-    }
-}
-
-@Composable
-private fun LightToggleRow(
-    title: String,
-    subtitle: String,
-    isChecked: Boolean,
-    enabled: Boolean = true,
-    onToggle: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = enabled) { onToggle() }
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-            Text(
-                text = title,
-                fontSize = 13.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = if (enabled) Color(0xFF1F2937) else Color(0xFF9CA3AF)
-            )
-            Text(
-                text = subtitle,
-                fontSize = 11.5.sp,
-                color = if (enabled) Color(0xFF6B7280) else Color(0xFFD1D5DB),
-                lineHeight = 15.sp
-            )
-        }
-
-        Switch(
-            checked = isChecked,
-            onCheckedChange = { onToggle() },
-            enabled = enabled,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = Color(0xFF1A73E8),
-                uncheckedThumbColor = Color.White,
-                uncheckedTrackColor = Color(0xFFD1D5DB)
-            )
+            modifier = Modifier.fillMaxWidth(),
+            content = content
         )
     }
 }
 
 @Composable
-private fun LightSelectPill(
-    label: String,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
+private fun FlagshipDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(horizontal = 14.dp),
+        thickness = 0.6.dp,
+        color = Color(0xFF262933)
+    )
+}
+
+@Composable
+private fun FlagshipRowItem(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    action: (@Composable () -> Unit)? = null
 ) {
-    Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = if (isSelected) Color(0xFF1A73E8) else Color(0xFFF3F4F6),
-        border = if (isSelected) null else BorderStroke(1.dp, Color(0xFFE5E7EB)),
-        modifier = modifier
-            .height(36.dp)
-            .clickable { onClick() }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
+        Row(
+            modifier = Modifier.weight(1f, fill = false),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text(
-                text = label,
-                fontSize = 12.sp,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                color = if (isSelected) Color.White else Color(0xFF374151)
-            )
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF232630)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = Color(0xFFFFD54F),
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+            Column {
+                Text(
+                    text = title,
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = subtitle,
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        if (action != null) {
+            Spacer(modifier = Modifier.width(8.dp))
+            action()
         }
     }
 }
 
 @Composable
-private fun LightOptionRow(
+private fun FlagshipSwitchItem(
+    icon: ImageVector,
     title: String,
     subtitle: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled) { onCheckedChange(!checked) }
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF232630)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = if (enabled) Color(0xFFFFD54F) else Color(0xFF6B7280),
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+            Column {
+                Text(
+                    text = title,
+                    color = if (enabled) Color.White else Color(0xFF9CA3AF),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = subtitle,
+                    color = if (enabled) Color(0xFF9CA3AF) else Color(0xFF6B7280),
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = if (enabled) onCheckedChange else null,
+            enabled = enabled,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color(0xFF121316),
+                checkedTrackColor = Color(0xFFFFD54F),
+                uncheckedThumbColor = Color(0xFF9CA3AF),
+                uncheckedTrackColor = Color(0xFF272A34),
+                disabledCheckedTrackColor = Color(0xFF3F3A22),
+                disabledUncheckedTrackColor = Color(0xFF1F2128)
+            ),
+            modifier = Modifier.scale(0.8f)
+        )
+    }
+}
+
+@Composable
+private fun FlagshipSmallChip(
+    label: String,
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = if (isSelected) Color(0xFFE8F0FE) else Color(0xFFF9FAFB),
+        shape = RoundedCornerShape(8.dp),
+        color = if (isSelected) Color(0xFF26210A) else Color(0xFF232630),
         border = BorderStroke(
-            width = if (isSelected) 1.5.dp else 1.dp,
-            color = if (isSelected) Color(0xFF1A73E8) else Color(0xFFE5E7EB)
+            width = 1.dp,
+            color = if (isSelected) Color(0xFFFFD54F) else Color.Transparent
         ),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (isSelected) Color(0xFF1A73E8) else Color(0xFF1F2937)
-                )
-                Text(
-                    text = subtitle,
-                    fontSize = 11.sp,
-                    color = Color(0xFF6B7280)
-                )
-            }
-
-            if (isSelected) {
-                Icon(
-                    imageVector = Icons.Outlined.Check,
-                    contentDescription = "Selected",
-                    tint = Color(0xFF1A73E8),
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun LightSpecItem(label: String, value: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 3.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        modifier = Modifier.clickable { onClick() }
     ) {
         Text(
             text = label,
-            fontSize = 12.5.sp,
-            color = Color(0xFF4B5563)
-        )
-        Text(
-            text = value,
-            fontSize = 12.5.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = Color(0xFF111827)
+            color = if (isSelected) Color(0xFFFFD54F) else Color(0xFFD1D5DB),
+            fontSize = 10.5.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
         )
     }
 }

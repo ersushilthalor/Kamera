@@ -60,6 +60,7 @@ class CinemaEngine(private val context: Context) {
     private var supportsColorCorrection: Boolean = false
     private var supportsEdgeOff: Boolean = false
     private var supportsNoiseOff: Boolean = false
+    private var availableFpsRanges: Array<android.util.Range<Int>> = emptyArray()
     private var tonemapMaxPoints: Int = CURVE_POINTS
 
     // Pre-allocated curve buffers for zero garbage collection during live recording
@@ -133,6 +134,7 @@ class CinemaEngine(private val context: Context) {
 
         // 3. Inspect target FPS ranges
         val fpsRanges = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: emptyArray()
+        availableFpsRanges = fpsRanges
         val supportedFps = mutableListOf<Int>()
         if (fpsRanges.any { it.upper >= 24 && it.lower <= 24 }) supportedFps.add(24)
         if (fpsRanges.any { it.upper >= 30 && it.lower <= 30 }) supportedFps.add(30)
@@ -236,13 +238,34 @@ class CinemaEngine(private val context: Context) {
             builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY)
         }
 
-        // 4. Real Camera2 EV (Exposure Compensation)
-        builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, config.exposureCompensation)
+        // 4. Real Camera2 EV (Exposure Compensation) with calibrated Log offset to prevent underexposure
+        val logCompensationOffset = if (config.logBitDepth != LogBitDepth.OFF) {
+            when (config.colorProfile) {
+                CinemaColorProfile.FLAT_LOG, CinemaColorProfile.S_LOG3, CinemaColorProfile.C_LOG3, CinemaColorProfile.V_LOG -> 3 // +1.0 EV
+                CinemaColorProfile.HLG -> 2 // +0.67 EV
+                else -> 0
+            }
+        } else {
+            0
+        }
+        builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, config.exposureCompensation + logCompensationOffset)
 
         // 5. White Balance Mode
         builder.set(CaptureRequest.CONTROL_AWB_MODE, config.whiteBalance.camera2Mode)
 
-        // 6. Manual ISO & Shutter Speed
+        // 6. Anti-Banding to prevent 50/60Hz flickering under artificial indoor lighting
+        builder.set(CaptureRequest.CONTROL_AE_ANTIBANDING_MODE, CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO)
+
+        // 7. Cinema Target FPS Range (matches chosen frame rate without sensor shutter starvation)
+        val targetFps = config.videoFps
+        val bestRange = availableFpsRanges.firstOrNull { it.upper == targetFps && it.lower == targetFps }
+            ?: availableFpsRanges.firstOrNull { it.upper == targetFps }
+            ?: availableFpsRanges.firstOrNull { it.upper >= targetFps && it.lower <= targetFps }
+        if (bestRange != null) {
+            builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, bestRange)
+        }
+
+        // 8. Manual ISO & Shutter Speed vs Auto Exposure
         if (config.manualIso != null || config.manualShutterSpeedNs != null) {
             builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
             config.manualIso?.let { builder.set(CaptureRequest.SENSOR_SENSITIVITY, it) }

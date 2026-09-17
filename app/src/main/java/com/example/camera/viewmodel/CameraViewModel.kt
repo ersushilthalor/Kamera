@@ -980,6 +980,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         preferences.exposureCompensation = value
         preferences.setModeEv(_cameraMode.value, value)
         engine.exposureCompensationIndex = value
+        if (_cameraMode.value == CameraMode.CINEMA) {
+            updateCinemaConfig(engine.cinemaConfig.value.copy(exposureCompensation = value))
+        }
         engine.updatePreviewSettings()
     }
 
@@ -1166,9 +1169,25 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun toggleUltraStabilization() {
         val current = hybridStabilizationConfig.value
         val nextState = !current.isUltraStabilizationEnabled
-        val updated = current.copy(isUltraStabilizationEnabled = nextState)
+        val updated = current.copy(
+            isUltraStabilizationEnabled = nextState,
+            isHybridEnabled = if (nextState) true else current.isHybridEnabled,
+            isEisPreferred = if (nextState) true else current.isEisPreferred
+        )
+        if (nextState) {
+            _isVideoStabilizationEnabled.value = true
+            preferences.isVideoStabilizationEnabled = true
+            engine.isVideoStabilizationEnabled = true
+        }
         setHybridStabilizationConfig(updated)
-        showToast(if (nextState) "Ultra Stabilization: Active" else "Ultra Stabilization: Off")
+        showToast(if (nextState) "Ultra Action Steady: Active" else "Ultra Stabilization: Off")
+    }
+
+    fun setOisPreferred(enabled: Boolean) {
+        val current = hybridStabilizationConfig.value
+        val updated = current.copy(isOisPreferred = enabled)
+        setHybridStabilizationConfig(updated)
+        showToast(if (enabled) "Optical Stabilization (OIS): On" else "Optical Stabilization (OIS): Off")
     }
 
     fun setTapFocusConfig(config: TapFocusConfig) {

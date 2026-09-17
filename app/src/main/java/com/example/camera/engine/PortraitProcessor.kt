@@ -76,18 +76,24 @@ class PortraitProcessor(private val context: Context) {
         // Optical Blur Guided Portrait Pipeline branch (when enabled)
         if (config.opticalBlurGuided) {
             onProgress(0.05f, "Initializing Optical Blur Guided Portrait...")
-            val opticalPipeline = OpticalBlurGuidedPipeline(context)
-            val opticalPortraitBmp = opticalPipeline.processOpticalGuidedPortrait(
-                fullResBitmap = orientedBitmap,
-                config = config,
-                onProgress = onProgress
-            )
-            onProgress(0.95f, "Saving optical portrait...")
-            val savedUri = saveToMediaStore(opticalPortraitBmp)
-            if (opticalPortraitBmp != orientedBitmap && !opticalPortraitBmp.isRecycled) {
-                opticalPortraitBmp.recycle()
+            try {
+                val opticalPipeline = OpticalBlurGuidedPipeline(context)
+                val opticalPortraitBmp = opticalPipeline.processOpticalGuidedPortrait(
+                    fullResBitmap = orientedBitmap,
+                    config = config,
+                    onProgress = onProgress
+                )
+                onProgress(0.95f, "Saving optical portrait...")
+                val savedUri = saveToMediaStore(opticalPortraitBmp)
+                if (opticalPortraitBmp != orientedBitmap && !opticalPortraitBmp.isRecycled) {
+                    opticalPortraitBmp.recycle()
+                }
+                if (savedUri != null) {
+                    return@withContext savedUri
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "Optical blur pipeline execution failed, falling back to standard portrait", t)
             }
-            return@withContext savedUri
         }
 
         var scaledProcessingBitmap: Bitmap? = null

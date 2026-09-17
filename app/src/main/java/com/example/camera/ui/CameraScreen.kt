@@ -791,6 +791,8 @@ fun CameraScreen(
             onVideoBitrateSelected = { viewModel.setVideoBitrate(it) },
             onStabilizationToggle = { viewModel.setVideoStabilization(it) },
             onHybridStabilizationChange = { viewModel.setHybridStabilizationConfig(it) },
+            onOisToggle = { viewModel.setOisPreferred(it) },
+            onUltraStabilizationToggle = { viewModel.toggleUltraStabilization() },
             onNightConfigChange = { viewModel.setNightConfig(it) },
             onTapFocusConfigChange = { viewModel.setTapFocusConfig(it) },
             onAudioToggle = { viewModel.toggleAudio() },
