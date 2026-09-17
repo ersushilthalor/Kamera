@@ -9,6 +9,7 @@ import android.util.Size as CameraSize
 import android.view.Surface
 import android.view.TextureView
 import android.view.WindowManager
+import kotlin.math.pow
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
@@ -214,20 +215,33 @@ fun Viewfinder(
                                     hasFilter = true
                                 }
                                 CinemaColorProfile.REC_2020 -> {
-                                    // Rec.2020: shadow lift to match scene
-                                    val recLift = android.graphics.ColorMatrix(floatArrayOf(
-                                        0.92f, 0f, 0f, 0f, 18f,
-                                        0f, 0.92f, 0f, 0f, 18f,
-                                        0f, 0f, 0.92f, 0f, 18f,
+                                    // Rec.2020: natural rich contrast and deep blacks without washed-out milky shadow pedestal
+                                    val rec2020Matrix = android.graphics.ColorMatrix(floatArrayOf(
+                                        1.0f, 0f, 0f, 0f, 0f,
+                                        0f, 1.0f, 0f, 0f, 0f,
+                                        0f, 0f, 1.0f, 0f, 0f,
                                         0f, 0f, 0f, 1f, 0f
                                     ))
-                                    colorMatrix.postConcat(recLift)
+                                    colorMatrix.postConcat(rec2020Matrix)
                                     hasFilter = true
                                 }
                                 else -> {}
                             }
 
-                            // 2. User Saturation control (+/-)
+                            // 2. Real-time Exposure control (+/-) on viewfinder
+                            if (cinemaConfig.exposure != 0.0f) {
+                                val expMultiplier = 2.0f.pow(cinemaConfig.exposure * 0.75f)
+                                val expMatrix = android.graphics.ColorMatrix(floatArrayOf(
+                                    expMultiplier, 0f, 0f, 0f, 0f,
+                                    0f, expMultiplier, 0f, 0f, 0f,
+                                    0f, 0f, expMultiplier, 0f, 0f,
+                                    0f, 0f, 0f, 1f, 0f
+                                ))
+                                colorMatrix.postConcat(expMatrix)
+                                hasFilter = true
+                            }
+
+                            // 3. User Saturation control (+/-)
                             if (cinemaConfig.saturation != 1.0f) {
                                 val satMatrix = android.graphics.ColorMatrix()
                                 satMatrix.setSaturation(cinemaConfig.saturation)
@@ -235,7 +249,7 @@ fun Viewfinder(
                                 hasFilter = true
                             }
 
-                            // 3. User Contrast control (+/-)
+                            // 4. User Contrast control (+/-)
                             if (cinemaConfig.contrast != 0.0f) {
                                 val c = 1.0f + (cinemaConfig.contrast * 0.4f)
                                 val t = (1.0f - c) * 128f
@@ -249,8 +263,10 @@ fun Viewfinder(
                                 hasFilter = true
                             }
 
-                            // 4. Cinematic LUT
-                            if (effectiveLutPreview && effectiveLut != null && effectiveLut != CinematicLut.NONE) {
+                            // 5. Cinematic LUT monitoring (active in both Preview LUT mode and Bake LUT mode)
+                            val shouldShowLut = (effectiveLutPreview || cinemaConfig.isBakeLutToOutput) &&
+                                    effectiveLut != null && effectiveLut != CinematicLut.NONE
+                            if (shouldShowLut && effectiveLut != null) {
                                 val lutMat = effectiveLut.toAndroidColorMatrix()
                                 if (lutMat != null) {
                                     colorMatrix.postConcat(lutMat)

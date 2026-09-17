@@ -53,6 +53,22 @@ class CinemaEngine(private val context: Context) {
             )
         }
 
+    fun updateConfig(newConfig: CinemaConfig) {
+        config = newConfig
+    }
+
+    fun getTonemapCurve(): TonemapCurve {
+        val lutForIsp = if (config.shouldBakeLut) config.selectedLut else CinematicLut.NONE
+        return generateLogTonemapCurve(
+            config.colorProfile,
+            config.shadows,
+            config.highlights,
+            config.contrast,
+            lutForIsp,
+            config.exposure
+        )
+    }
+
     private var _capabilities = CinemaHardwareCapabilities()
     val capabilities: CinemaHardwareCapabilities get() = _capabilities
 
@@ -62,6 +78,18 @@ class CinemaEngine(private val context: Context) {
     private var supportsTransformMatrix: Boolean = false
     private var supportsEdgeOff: Boolean = false
     private var supportsNoiseOff: Boolean = false
+    private var availableNoiseModes: IntArray = intArrayOf(
+        CaptureRequest.NOISE_REDUCTION_MODE_OFF,
+        CaptureRequest.NOISE_REDUCTION_MODE_FAST,
+        CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY,
+        CaptureRequest.NOISE_REDUCTION_MODE_MINIMAL
+    )
+    private var availableEdgeModes: IntArray = intArrayOf(
+        CaptureRequest.EDGE_MODE_OFF,
+        CaptureRequest.EDGE_MODE_FAST,
+        CaptureRequest.EDGE_MODE_HIGH_QUALITY
+    )
+    private var aeCompensationRange: android.util.Range<Int> = android.util.Range(-6, 6)
     private var availableFpsRanges: Array<android.util.Range<Int>> = emptyArray()
     private var tonemapMaxPoints: Int = CURVE_POINTS
 
@@ -86,10 +114,14 @@ class CinemaEngine(private val context: Context) {
                 colorModes.contains(CameraCharacteristics.COLOR_CORRECTION_MODE_HIGH_QUALITY)
 
         val edgeModes = chars.get(CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES) ?: intArrayOf()
+        availableEdgeModes = edgeModes
         supportsEdgeOff = edgeModes.contains(CameraCharacteristics.EDGE_MODE_OFF)
 
         val noiseModes = chars.get(CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES) ?: intArrayOf()
+        availableNoiseModes = noiseModes
         supportsNoiseOff = noiseModes.contains(CameraCharacteristics.NOISE_REDUCTION_MODE_OFF)
+
+        aeCompensationRange = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE) ?: android.util.Range(-6, 6)
 
         // 1. Check Camera2 DynamicRangeProfiles (Android 13+ / API 33+)
         var dynamicRange10Bit = false
@@ -178,14 +210,19 @@ class CinemaEngine(private val context: Context) {
             builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_FAST)
             builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_FAST)
         } else {
-            // 1. Dynamic Hardware Tonemap Curve (Genuine Optical Log Transfer + Shadows, Highlights, Contrast adjustments + LUT Tone)
+            // Only bake LUT into the hardware recording stream if "Bake LUT to Output" is active.
+            // In Preview LUT mode, keep the ISP curve and gamut pure Flat Log for mastering.
+            val lutForIsp = if (config.shouldBakeLut) config.selectedLut else CinematicLut.NONE
+
+            // 1. Dynamic Hardware Tonemap Curve (Log Transfer + Shadows, Highlights, Contrast, Exposure + Baked LUT)
             if (supportsContrastCurve) {
                 val tonemapCurve = generateLogTonemapCurve(
                     config.colorProfile,
                     config.shadows,
                     config.highlights,
                     config.contrast,
-                    config.selectedLut
+                    lutForIsp,
+                    config.exposure
                 )
                 builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
                 builder.set(CaptureRequest.TONEMAP_CURVE, tonemapCurve)
@@ -197,26 +234,26 @@ class CinemaEngine(private val context: Context) {
                     CinemaColorProfile.REC_2020 -> 2.1f
                     CinemaColorProfile.REC_709 -> 2.2f
                 }
-                val lutContrastOffset = if (config.selectedLut != CinematicLut.NONE) (config.selectedLut.contrast - 1.0f) * 0.3f else 0.0f
-                val adjustedGamma = (baseGamma + (config.contrast * 0.3f) + lutContrastOffset).coerceIn(1.0f, 3.0f)
+                val lutContrastOffset = if (lutForIsp != CinematicLut.NONE) (lutForIsp.contrast - 1.0f) * 0.3f else 0.0f
+                val adjustedGamma = (baseGamma + (config.contrast * 0.3f) + (config.exposure * 0.2f) + lutContrastOffset).coerceIn(1.0f, 3.0f)
                 builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_GAMMA_VALUE)
                 builder.set(CaptureRequest.TONEMAP_GAMMA, adjustedGamma)
             } else {
                 builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)
             }
 
-            // 2. Hardware Color Space Matrix (Gamut Transfer + Saturation Scaling + Cinematic LUT)
+            // 2. Hardware Color Space Matrix (Gamut Transfer + Saturation Scaling + Baked LUT)
             if (supportsColorCorrection) {
                 val transform = generateColorSpaceTransform(
                     config.colorSpace,
                     config.colorProfile,
                     config.saturation,
-                    config.selectedLut
+                    lutForIsp
                 )
                 if (supportsTransformMatrix) {
                     builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
                     builder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform)
-                    builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, generateColorGains(config.selectedLut))
+                    builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, generateColorGains(lutForIsp))
                 } else {
                     builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_FAST)
                     builder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform)
@@ -241,31 +278,61 @@ class CinemaEngine(private val context: Context) {
             }
         }
 
-        if (config.isRawSensorLogPipeline) {
-            if (supportsNoiseOff) {
-                builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_OFF)
-            } else {
-                builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_FAST)
+        // Live Noise Reduction with Off / Low / Medium / High
+        val targetNrMode = when (config.noiseReduction) {
+            CinemaNoiseReduction.OFF -> {
+                if (availableNoiseModes.contains(CaptureRequest.NOISE_REDUCTION_MODE_OFF)) {
+                    CaptureRequest.NOISE_REDUCTION_MODE_OFF
+                } else if (availableNoiseModes.contains(CaptureRequest.NOISE_REDUCTION_MODE_MINIMAL)) {
+                    CaptureRequest.NOISE_REDUCTION_MODE_MINIMAL
+                } else {
+                    CaptureRequest.NOISE_REDUCTION_MODE_FAST
+                }
             }
+            CinemaNoiseReduction.LOW -> {
+                if (availableNoiseModes.contains(CaptureRequest.NOISE_REDUCTION_MODE_MINIMAL)) {
+                    CaptureRequest.NOISE_REDUCTION_MODE_MINIMAL
+                } else {
+                    CaptureRequest.NOISE_REDUCTION_MODE_FAST
+                }
+            }
+            CinemaNoiseReduction.MEDIUM -> {
+                if (availableNoiseModes.contains(CaptureRequest.NOISE_REDUCTION_MODE_FAST)) {
+                    CaptureRequest.NOISE_REDUCTION_MODE_FAST
+                } else {
+                    CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY
+                }
+            }
+            CinemaNoiseReduction.HIGH -> {
+                if (availableNoiseModes.contains(CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY)) {
+                    CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY
+                } else {
+                    CaptureRequest.NOISE_REDUCTION_MODE_FAST
+                }
+            }
+        }
+        builder.set(CaptureRequest.NOISE_REDUCTION_MODE, targetNrMode)
 
+        if (config.isRawSensorLogPipeline) {
             builder.set(CaptureRequest.SHADING_MODE, CaptureRequest.SHADING_MODE_HIGH_QUALITY)
             builder.set(CaptureRequest.HOT_PIXEL_MODE, CaptureRequest.HOT_PIXEL_MODE_FAST)
             builder.set(CaptureRequest.DISTORTION_CORRECTION_MODE, CaptureRequest.DISTORTION_CORRECTION_MODE_OFF)
-        } else {
-            builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY)
         }
 
-        // 4. Real Camera2 EV (Exposure Compensation) with calibrated Log offset to prevent underexposure
+        // 4. Real Camera2 EV (Exposure Compensation) with calibrated Log offset and live Exposure slider
         val logCompensationOffset = if (config.logBitDepth != LogBitDepth.OFF) {
             when (config.colorProfile) {
-                CinemaColorProfile.FLAT_LOG, CinemaColorProfile.S_LOG3, CinemaColorProfile.C_LOG3, CinemaColorProfile.V_LOG, CinemaColorProfile.REC_2020 -> 3 // +1.0 EV
+                CinemaColorProfile.FLAT_LOG, CinemaColorProfile.S_LOG3, CinemaColorProfile.C_LOG3, CinemaColorProfile.V_LOG -> 3 // +1.0 EV
                 CinemaColorProfile.HLG -> 2 // +0.67 EV
-                else -> 0
+                else -> 0 // Rec.2020: natural exposure without artificial positive EV offset
             }
         } else {
             0
         }
-        builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, config.exposureCompensation + logCompensationOffset)
+        val exposureSliderSteps = (config.exposure * 6f).roundToInt()
+        val totalExposureComp = (config.exposureCompensation + logCompensationOffset + exposureSliderSteps)
+            .coerceIn(aeCompensationRange.lower, aeCompensationRange.upper)
+        builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, totalExposureComp)
 
         // 5. White Balance Mode
         builder.set(CaptureRequest.CONTROL_AWB_MODE, config.whiteBalance.camera2Mode)
@@ -293,21 +360,30 @@ class CinemaEngine(private val context: Context) {
     }
 
     /**
-     * Compute mathematically accurate transfer curves for cinematic Log profiles with Shadows, Highlights, Contrast, and LUT.
+     * Compute mathematically accurate transfer curves for cinematic Log profiles with Shadows, Highlights, Contrast, Exposure, and LUT.
      */
     private fun generateLogTonemapCurve(
         profile: CinemaColorProfile,
         shadows: Float,
         highlights: Float,
         contrast: Float,
-        lut: CinematicLut = CinematicLut.NONE
+        lut: CinematicLut = CinematicLut.NONE,
+        exposure: Float = 0.0f
     ): TonemapCurve {
         val numPoints = CURVE_POINTS
         val lutContrast = if (lut != CinematicLut.NONE) (lut.contrast - 1.0f) else 0.0f
         val totalContrast = (contrast + lutContrast).coerceIn(-1.0f, 1.5f)
 
         for (i in 0 until numPoints) {
-            val x = i.toFloat() / (numPoints - 1).toFloat()
+            val baseNormalizedX = i.toFloat() / (numPoints - 1).toFloat()
+            // Real-time live exposure shifts sensor input value along characteristic curve
+            val x = if (exposure != 0.0f) {
+                val expScale = 2.0f.pow(exposure * 0.75f)
+                (baseNormalizedX * expScale).coerceIn(0f, 1f)
+            } else {
+                baseNormalizedX
+            }
+
             var y = evaluateLogTransferFunction(profile, x)
 
             // 1. Contrast (S-Curve adjustment centered around middle-grey ~0.18):
@@ -332,15 +408,15 @@ class CinemaEngine(private val context: Context) {
             val idx = i * 2
 
             // Red channel
-            curveRed[idx] = x
+            curveRed[idx] = baseNormalizedX
             curveRed[idx + 1] = finalY
 
             // Green channel
-            curveGreen[idx] = x
+            curveGreen[idx] = baseNormalizedX
             curveGreen[idx + 1] = finalY
 
             // Blue channel
-            curveBlue[idx] = x
+            curveBlue[idx] = baseNormalizedX
             curveBlue[idx + 1] = finalY
         }
         return TonemapCurve(curveRed, curveGreen, curveBlue)
@@ -407,16 +483,15 @@ class CinemaEngine(private val context: Context) {
                 }
             }
             CinemaColorProfile.REC_2020 -> {
-                // ITU-R BT.2020 transfer function with calibrated midtone lifting:
+                // ITU-R BT.2020 standard transfer function (OETF) without artificial pedestal lift:
+                // Preserves inky blacks (y=0 at inVal=0), punchy natural contrast, and crisp whites at inVal=1
                 val alpha = 1.09929682680944f
                 val beta = 0.018053968510807f
-                val base = if (inVal < beta) {
-                    4.5f * inVal
+                if (inVal < beta) {
+                    (4.5f * inVal).coerceIn(0f, 1f)
                 } else {
-                    alpha * inVal.pow(0.45f) - (alpha - 1.0f)
+                    (alpha * inVal.pow(0.45f) - (alpha - 1.0f)).coerceIn(0f, 1f)
                 }
-                // Lift shadows & midtones so Rec.2020 Log matches actual scene exposure without crushing
-                (0.12f + 0.88f * base).coerceIn(0f, 1f)
             }
             CinemaColorProfile.HLG -> {
                 // ITU-R BT.2100 Hybrid Log-Gamma transfer function:
@@ -448,9 +523,9 @@ class CinemaEngine(private val context: Context) {
                 0.0f, 0.0f, 1.0f
             )
             CinemaColorSpace.REC_2020 -> floatArrayOf(
-                160f / 256f, 76f / 256f, 20f / 256f,
-                18f / 256f, 218f / 256f, 20f / 256f,
-                8f / 256f, 32f / 256f, 216f / 256f
+                0.6274f, 0.3293f, 0.0433f,
+                0.0691f, 0.9195f, 0.0114f,
+                0.0164f, 0.0880f, 0.8956f
             )
             CinemaColorSpace.DCI_P3 -> floatArrayOf(
                 210f / 256f, 38f / 256f, 8f / 256f,
@@ -482,11 +557,15 @@ class CinemaEngine(private val context: Context) {
                 // Blend in LUT's matrix orientation if available
                 if (lut != CinematicLut.NONE) {
                     val lutMatrix = when (lut) {
-                        CinematicLut.FILMIC_GOLD -> floatArrayOf(1.10f, 0.02f, -0.05f, 0.02f, 1.04f, -0.02f, -0.06f, 0.01f, 0.92f)
+                        CinematicLut.KODAK_2383 -> floatArrayOf(1.10f, 0.02f, -0.05f, 0.02f, 1.04f, -0.02f, -0.06f, 0.01f, 0.92f)
                         CinematicLut.TEAL_ORANGE -> floatArrayOf(1.15f, -0.05f, -0.06f, -0.03f, 1.06f, 0.04f, -0.08f, 0.06f, 1.18f)
                         CinematicLut.MUTED_CINE -> floatArrayOf(0.95f, 0.03f, 0.03f, 0.03f, 0.96f, 0.03f, 0.03f, 0.03f, 0.97f)
-                        CinematicLut.HIGH_CONTRAST -> floatArrayOf(1.25f, -0.08f, -0.08f, -0.08f, 1.25f, -0.08f, -0.08f, -0.08f, 1.25f)
+                        CinematicLut.BLEACH_BYPASS -> floatArrayOf(1.22f, 0.10f, 0.10f, 0.10f, 1.22f, 0.10f, 0.10f, 0.10f, 1.22f)
                         CinematicLut.MONO_CINE -> floatArrayOf(0.299f, 0.587f, 0.114f, 0.299f, 0.587f, 0.114f, 0.299f, 0.587f, 0.114f)
+                        CinematicLut.ARRI_ALEXA_709 -> floatArrayOf(1.08f, -0.02f, -0.02f, -0.01f, 1.06f, -0.01f, -0.02f, -0.02f, 1.08f)
+                        CinematicLut.KODAK_PORTRA -> floatArrayOf(1.12f, 0.04f, -0.04f, 0.02f, 1.04f, -0.02f, -0.04f, -0.01f, 0.94f)
+                        CinematicLut.FUJI_ETERNA -> floatArrayOf(0.96f, 0.02f, 0.02f, 0.02f, 0.98f, 0.02f, 0.02f, 0.04f, 1.04f)
+                        CinematicLut.NEO_NOIR -> floatArrayOf(0.92f, 0.01f, -0.01f, -0.02f, 1.05f, 0.03f, -0.04f, 0.04f, 1.15f)
                         else -> null
                     }
                     if (lutMatrix != null) {

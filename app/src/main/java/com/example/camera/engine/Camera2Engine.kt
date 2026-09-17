@@ -13,6 +13,10 @@ import android.hardware.camera2.*
 import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.StreamConfigurationMap
 import android.hardware.camera2.params.TonemapCurve
+import android.hardware.camera2.params.DynamicRangeProfiles
+import android.hardware.camera2.params.OutputConfiguration
+import android.hardware.camera2.params.SessionConfiguration
+import java.util.concurrent.Executors
 import android.media.CamcorderProfile
 import android.media.Image
 import android.media.ImageReader
@@ -3339,6 +3343,53 @@ class Camera2Engine(private val context: Context) {
     }
 
     /**
+     * Creates an end-to-end 10-bit HDR or standard capture session for recording.
+     * When 10-bit is requested and the device supports DynamicRangeProfiles (Android 13+),
+     * this configures the recorder surface with HLG10/HDR10 to ensure raw 10-bit HAL stream buffers.
+     */
+    private fun createRecordingCaptureSession(
+        camera: CameraDevice,
+        previewSurface: Surface,
+        recorderSurface: Surface,
+        is10Bit: Boolean,
+        callback: CameraCaptureSession.StateCallback
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && is10Bit) {
+            try {
+                val chars = getCharacteristics(camera.id)
+                val dynamicProfiles = chars?.get(CameraCharacteristics.REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES)
+                val supported = dynamicProfiles?.supportedProfiles ?: emptySet()
+                val targetProfile = when {
+                    supported.contains(DynamicRangeProfiles.HLG10) -> DynamicRangeProfiles.HLG10
+                    supported.contains(DynamicRangeProfiles.HDR10) -> DynamicRangeProfiles.HDR10
+                    supported.contains(DynamicRangeProfiles.HDR10_PLUS) -> DynamicRangeProfiles.HDR10_PLUS
+                    else -> null
+                }
+
+                if (targetProfile != null) {
+                    val recorderConfig = OutputConfiguration(recorderSurface).apply {
+                        dynamicRangeProfile = targetProfile
+                    }
+                    val previewConfig = OutputConfiguration(previewSurface)
+                    val sessionConfig = SessionConfiguration(
+                        SessionConfiguration.SESSION_REGULAR,
+                        listOf(previewConfig, recorderConfig),
+                        Executors.newSingleThreadExecutor(),
+                        callback
+                    )
+                    camera.createCaptureSession(sessionConfig)
+                    Log.i(TAG, "Configured 10-bit CameraCaptureSession with DynamicRangeProfile: $targetProfile")
+                    return
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to create 10-bit SessionConfiguration, falling back to standard capture session", e)
+            }
+        }
+
+        camera.createCaptureSession(listOf(previewSurface, recorderSurface), callback, backgroundHandler)
+    }
+
+    /**
      * Start Video Recording
      */
     fun startVideoRecording(onError: (String) -> Unit) {
@@ -3356,9 +3407,19 @@ class Camera2Engine(private val context: Context) {
             } else {
                 _selectedVideoResolution.value ?: CameraResolution(1920, 1080)
             }
-            val is10BitRequested = isCinema && cinemaConfig.value.logBitDepth == LogBitDepth.BIT_10 && cinemaCapabilities.value.supports10BitRecording
+            val cinemaCodec = if (isCinema) cinemaConfig.value.codec else CinemaCodec.H264
+            val isHdrVideoActive = (currentMode == CameraMode.VIDEO && videoHdrEngine.mode != VideoHdrMode.OFF)
+            val is10BitRequested = (isCinema && (cinemaConfig.value.logBitDepth == LogBitDepth.BIT_10 || cinemaCodec == CinemaCodec.PRORES)) ||
+                    (isHdrVideoActive && cinemaCapabilities.value.supports10BitRecording)
             val bitrate = if (isCinema) {
                 when {
+                    cinemaCodec == CinemaCodec.PRORES -> {
+                        when {
+                            videoRes.width >= 3840 -> 150_000_000
+                            videoRes.width >= 1920 -> 90_000_000
+                            else -> 50_000_000
+                        }
+                    }
                     videoRes.width >= 3840 -> 100_000_000
                     videoRes.width >= 1920 -> 60_000_000
                     else -> 30_000_000
@@ -3379,7 +3440,6 @@ class Camera2Engine(private val context: Context) {
                 }
             }
             val targetFps = if (isCinema) cinemaConfig.value.videoFps else videoFps
-            val cinemaCodec = if (isCinema) cinemaConfig.value.codec else CinemaCodec.H264
             val isSoftwareCinema = isCinema && (cinemaCodec == CinemaCodec.PRORES || cinemaCodec == CinemaCodec.VP9)
 
             val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
@@ -3429,9 +3489,12 @@ class Camera2Engine(private val context: Context) {
                     applyCommonSettings(this)
                 }
 
-                camera.createCaptureSession(
-                    surfaces,
-                    object : CameraCaptureSession.StateCallback() {
+                createRecordingCaptureSession(
+                    camera = camera,
+                    previewSurface = previewSurf,
+                    recorderSurface = recorderSurface,
+                    is10Bit = is10BitRequested || cinemaCodec == CinemaCodec.PRORES,
+                    callback = object : CameraCaptureSession.StateCallback() {
                         override fun onConfigured(session: CameraCaptureSession) {
                             captureSession = session
                             try {
@@ -3460,8 +3523,7 @@ class Camera2Engine(private val context: Context) {
                             }
                             onError("Failed to configure cinema recording capture session")
                         }
-                    },
-                    backgroundHandler
+                    }
                 )
                 return
             }
@@ -3606,9 +3668,12 @@ class Camera2Engine(private val context: Context) {
                 applyCommonSettings(this)
             }
 
-            camera.createCaptureSession(
-                surfaces,
-                object : CameraCaptureSession.StateCallback() {
+            createRecordingCaptureSession(
+                camera = camera,
+                previewSurface = previewSurf,
+                recorderSurface = recorderSurface,
+                is10Bit = is10BitRequested,
+                callback = object : CameraCaptureSession.StateCallback() {
                     override fun onConfigured(session: CameraCaptureSession) {
                         captureSession = session
                         try {
@@ -3644,8 +3709,7 @@ class Camera2Engine(private val context: Context) {
                         }
                         onError("Camera hardware failed to configure video capture session")
                     }
-                },
-                backgroundHandler
+                }
             )
 
         } catch (e: Exception) {

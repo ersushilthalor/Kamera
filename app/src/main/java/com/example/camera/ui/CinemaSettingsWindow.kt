@@ -754,35 +754,37 @@ fun CinemaSettingsWindow(
                             )
                         }
 
-                        // Preview Only vs Bake-in Switch
+                        // Bake LUT to Output vs Preview Only Switch
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = if (config.isLutPreviewOnly) "Preview Only" else "Bake In",
+                                text = if (config.isBakeLutToOutput) "Bake to Video" else "Preview Only",
                                 color = Color.White.copy(alpha = 0.85f),
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Medium
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Switch(
-                                checked = config.isLutPreviewOnly,
-                                onCheckedChange = { onConfigChange(config.copy(isLutPreviewOnly = it)) },
+                                checked = config.isBakeLutToOutput,
+                                onCheckedChange = {
+                                    onConfigChange(config.copy(isBakeLutToOutput = it, isLutPreviewOnly = !it, isLutPreviewEnabled = true))
+                                },
                                 colors = SwitchDefaults.colors(
                                     checkedThumbColor = Color.Black,
                                     checkedTrackColor = Color(0xFF64FFDA),
                                     uncheckedThumbColor = Color.White.copy(alpha = 0.6f),
                                     uncheckedTrackColor = Color(0xFF2C2C34)
                                 ),
-                                modifier = Modifier.scale(0.7f).testTag("lut_preview_toggle")
+                                modifier = Modifier.scale(0.7f).testTag("lut_bake_toggle")
                             )
                         }
                     }
 
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = if (config.isLutPreviewOnly)
-                            "LUT applied to viewfinder monitor only; recorded file remains clean 10-bit Log."
+                        text = if (config.isBakeLutToOutput)
+                            "LUT color grading is baked directly into the recorded video output."
                         else
-                            "LUT color grading is baked directly into the recorded video.",
+                            "LUT applied to live viewfinder monitor only; recorded file remains clean Log master.",
                         color = Color.White.copy(alpha = 0.65f),
                         fontSize = 9.5.sp,
                         lineHeight = 13.sp
@@ -1107,7 +1109,85 @@ fun CinemaSettingsWindow(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Shadows, Highlights, Contrast, Saturation Sliders
+                // Live Noise Reduction: Off / Low / Medium / High
+                Text(
+                    text = "Live Noise Reduction",
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF222228))
+                        .padding(2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    CinemaNoiseReduction.entries.forEach { nr ->
+                        val isSelected = config.noiseReduction == nr
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) Color(0xFFFFD54F) else Color.Transparent)
+                                .clickable {
+                                    onConfigChange(config.copy(noiseReduction = nr))
+                                }
+                                .padding(vertical = 6.dp)
+                                .testTag("cinema_nr_${nr.name.lowercase()}"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = nr.label,
+                                color = if (isSelected) Color.Black else Color.White.copy(alpha = 0.85f),
+                                fontSize = 10.5.sp,
+                                fontWeight = if (isSelected) FontWeight.Black else FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Exposure, Shadows, Highlights, Contrast, Saturation Sliders
+                // Exposure Slider (Real-time Preview & Recording)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Exposure",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = if (config.exposure == 0.0f) "0.0" else "%.2f".format(config.exposure),
+                        color = Color(0xFFFFD54F),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Slider(
+                    value = config.exposure,
+                    onValueChange = { onConfigChange(config.copy(exposure = it)) },
+                    valueRange = -1.0f..1.0f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color(0xFFFFD54F),
+                        activeTrackColor = Color(0xFFFFD54F),
+                        inactiveTrackColor = Color(0xFF33333C)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(32.dp)
+                        .testTag("cinema_slider_exposure")
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
                 // Shadows
                 Row(
                     modifier = Modifier.fillMaxWidth(),
