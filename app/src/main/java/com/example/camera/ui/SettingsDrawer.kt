@@ -30,27 +30,35 @@ import androidx.compose.ui.unit.sp
 import com.example.camera.model.*
 
 /**
- * Premium Stock Flagship Camera Settings Categories:
- * 1. Capture & Quality
- * 2. Video & Audio
- * 3. Processing & AI
- * 4. Controls & Gestures
- * 5. Advanced & Labs
- * 6. General / About
+ * Samsung One UI Camera Settings Categories:
+ * 1. ALL ("All")
+ * 2. PICTURES ("Pictures & Quality")
+ * 3. PROCESSING ("Photo Pipelines")
+ * 4. STABILIZATION ("Stabilization")
+ * 5. VIDEOS ("Videos & Audio")
+ * 6. UI_CUSTOMIZATION ("UI & Layout")
+ * 7. INTELLIGENT ("Intelligent")
+ * 8. CONTROLS ("Controls & Gestures")
+ * 9. ADVANCED ("Advanced & Labs")
+ * 10. ABOUT ("About Camera")
  */
 enum class FlagshipCategory(val title: String, val icon: ImageVector) {
     ALL("All", Icons.Outlined.GridView),
-    CAPTURE("Capture & Quality", Icons.Outlined.CameraAlt),
-    VIDEO("Video & Audio", Icons.Outlined.Videocam),
-    PROCESSING("Processing & AI", Icons.Outlined.AutoAwesome),
-    CONTROLS("Controls & Gestures", Icons.Outlined.TouchApp),
-    ADVANCED("Advanced & Labs", Icons.Outlined.Build),
-    ABOUT("General / About", Icons.Outlined.Info)
+    PICTURES("Pictures", Icons.Outlined.CameraAlt),
+    PROCESSING("Pipelines", Icons.Outlined.AutoFixHigh),
+    STABILIZATION("Stabilization", Icons.Outlined.VideoStable),
+    VIDEOS("Videos", Icons.Outlined.Videocam),
+    UI_CUSTOMIZATION("UI & Layout", Icons.Outlined.DashboardCustomize),
+    INTELLIGENT("Intelligent", Icons.Outlined.AutoAwesome),
+    CONTROLS("Controls", Icons.Outlined.TouchApp),
+    ADVANCED("Advanced", Icons.Outlined.Build),
+    ABOUT("About", Icons.Outlined.Info)
 }
 
 /**
- * Redesigned Premium Stock Flagship Camera Settings Sheet.
- * Simple, clean, minimal dark theme matching the camera viewfinder.
+ * Clean Light Theme, Samsung-Style Camera Settings Bottom Sheet.
+ * Displays all camera settings, UI customization, photo mode processing pipelines,
+ * and synchronized main camera stabilization with dedicated EIS-only option.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -102,6 +110,8 @@ fun SettingsDrawer(
     manualFocusDistance: Float = 0.0f,
     portraitConfig: PortraitConfig = PortraitConfig(),
     selectedPhotoFilter: PhotoFilter = PhotoFilter.ORIGINAL,
+    mainCameraStabilizationMode: MainCameraStabilizationMode = MainCameraStabilizationMode.HYBRID_OIS_EIS,
+    onMainCameraStabilizationModeSelected: (MainCameraStabilizationMode) -> Unit = {},
     // Callbacks
     onLensSelected: (LensInfo) -> Unit = {},
     onForceDeepScan: () -> Unit = {},
@@ -183,10 +193,10 @@ fun SettingsDrawer(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Color(0xFF121316),
-        contentColor = Color(0xFFF3F4F6),
+        containerColor = Color(0xFFF7F9FC),
+        contentColor = Color(0xFF1E293B),
         dragHandle = {
-            BottomSheetDefaults.DragHandle(color = Color(0xFF374151))
+            BottomSheetDefaults.DragHandle(color = Color(0xFFCBD5E1))
         },
         modifier = modifier.testTag("settings_bottom_sheet")
     ) {
@@ -195,7 +205,7 @@ fun SettingsDrawer(
                 .fillMaxWidth()
                 .navigationBarsPadding()
         ) {
-            // Header Bar
+            // Samsung One UI Top Header
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -203,31 +213,18 @@ fun SettingsDrawer(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF26210A))
-                            .border(1.dp, Color(0xFFFFD54F).copy(alpha = 0.6f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Settings,
-                            contentDescription = null,
-                            tint = Color(0xFFFFD54F),
-                            modifier = Modifier.size(17.dp)
-                        )
-                    }
+                Column {
                     Text(
-                        text = "Camera Settings",
-                        color = Color.White,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = (-0.2).sp
+                        text = "Camera settings",
+                        color = Color(0xFF0F172A),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.3).sp
+                    )
+                    Text(
+                        text = "Customize capture, pipelines, stabilization & UI",
+                        color = Color(0xFF64748B),
+                        fontSize = 11.sp
                     )
                 }
 
@@ -236,30 +233,30 @@ fun SettingsDrawer(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFF1F2127))
+                        .background(Color(0xFFE2E8F0))
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Close Settings",
-                        tint = Color(0xFF9CA3AF),
+                        tint = Color(0xFF334155),
                         modifier = Modifier.size(16.dp)
                     )
                 }
             }
 
-            // Category Filter Pills
+            // Category Filter Pills (Samsung Style Capsule Pills)
             LazyRow(
-                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(FlagshipCategory.entries.toTypedArray()) { cat ->
                     val isSelected = selectedFilterCategory == cat
                     Surface(
-                        shape = RoundedCornerShape(18.dp),
-                        color = if (isSelected) Color(0xFFFFD54F) else Color(0xFF1E2026),
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (isSelected) Color(0xFF1D4ED8) else Color(0xFFFFFFFF),
                         border = BorderStroke(
                             width = 1.dp,
-                            color = if (isSelected) Color(0xFFFFD54F) else Color(0xFF2C2F38)
+                            color = if (isSelected) Color(0xFF1D4ED8) else Color(0xFFE2E8F0)
                         ),
                         modifier = Modifier
                             .clickable { selectedFilterCategory = cat }
@@ -273,12 +270,12 @@ fun SettingsDrawer(
                             Icon(
                                 imageVector = cat.icon,
                                 contentDescription = null,
-                                tint = if (isSelected) Color(0xFF121316) else Color(0xFF9CA3AF),
+                                tint = if (isSelected) Color.White else Color(0xFF64748B),
                                 modifier = Modifier.size(13.dp)
                             )
                             Text(
                                 text = cat.title,
-                                color = if (isSelected) Color(0xFF121316) else Color(0xFFE5E7EB),
+                                color = if (isSelected) Color.White else Color(0xFF334155),
                                 fontSize = 11.5.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                             )
@@ -292,16 +289,16 @@ fun SettingsDrawer(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
-                contentPadding = PaddingValues(bottom = 32.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                contentPadding = PaddingValues(bottom = 36.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // 1. CAPTURE & QUALITY
-                if (selectedFilterCategory == FlagshipCategory.ALL || selectedFilterCategory == FlagshipCategory.CAPTURE) {
+                // 1. PICTURES & QUALITY
+                if (selectedFilterCategory == FlagshipCategory.ALL || selectedFilterCategory == FlagshipCategory.PICTURES) {
                     item {
-                        FlagshipSectionHeader("CAPTURE & QUALITY")
-                        FlagshipCard {
+                        SamsungSectionHeader("PICTURES & QUALITY")
+                        SamsungCard {
                             // Photo Resolution
-                            FlagshipRowItem(
+                            SamsungRowItem(
                                 icon = Icons.Outlined.PhotoSizeSelectActual,
                                 title = "Photo Resolution",
                                 subtitle = "${photoMegapixelMode.label} · ${selectedPhotoResolution?.let { "${it.width}x${it.height}" } ?: "High Res"}"
@@ -309,7 +306,7 @@ fun SettingsDrawer(
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     PhotoMegapixelMode.entries.forEach { mode ->
                                         val isSelected = photoMegapixelMode == mode
-                                        FlagshipSmallChip(
+                                        SamsungSmallChip(
                                             label = mode.label,
                                             isSelected = isSelected,
                                             onClick = { onPhotoMegapixelModeSelected(mode) }
@@ -318,28 +315,28 @@ fun SettingsDrawer(
                                 }
                             }
 
-                            FlagshipDivider()
+                            SamsungDivider()
 
                             // RAW Capture (DNG)
-                            FlagshipSwitchItem(
+                            SamsungSwitchItem(
                                 icon = Icons.Outlined.RawOn,
-                                title = "RAW (DNG) Capture",
-                                subtitle = "Save 16-bit uncompressed sensor data",
+                                title = "RAW (DNG) Copies",
+                                subtitle = "Save 16-bit uncompressed RAW files to DCIM/Raw",
                                 checked = isRawEnabled,
                                 onCheckedChange = { onRawToggle() }
                             )
 
-                            FlagshipDivider()
+                            SamsungDivider()
 
                             // JPEG Quality
-                            FlagshipRowItem(
+                            SamsungRowItem(
                                 icon = Icons.Outlined.HighQuality,
-                                title = "JPEG Quality",
-                                subtitle = "$jpegQuality% compression quality"
+                                title = "Picture Quality",
+                                subtitle = "$jpegQuality% JPEG encoder quality"
                             ) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     listOf(90, 95, 100).forEach { q ->
-                                        FlagshipSmallChip(
+                                        SamsungSmallChip(
                                             label = "$q%",
                                             isSelected = jpegQuality == q,
                                             onClick = { onJpegQualitySelected(q) }
@@ -348,28 +345,28 @@ fun SettingsDrawer(
                                 }
                             }
 
-                            FlagshipDivider()
+                            SamsungDivider()
 
-                            // Refocus Photo
-                            FlagshipSwitchItem(
-                                icon = Icons.Outlined.FilterCenterFocus,
-                                title = "Refocus Photo",
-                                subtitle = "Burst capture with varying focal depths",
-                                checked = isRefocusPhotoEnabled,
-                                onCheckedChange = onRefocusPhotoToggle
+                            // Auto HDR
+                            SamsungSwitchItem(
+                                icon = Icons.Outlined.HdrOn,
+                                title = "Auto HDR",
+                                subtitle = "Capture detail in bright highlights and dark shadows",
+                                checked = isAutoHdrEnabled,
+                                onCheckedChange = onAutoHdrToggle
                             )
 
-                            FlagshipDivider()
+                            SamsungDivider()
 
-                            // Grid Overlay
-                            FlagshipRowItem(
+                            // Framing Grid
+                            SamsungRowItem(
                                 icon = Icons.Outlined.GridOn,
-                                title = "Framing Grid",
+                                title = "Grid Lines",
                                 subtitle = gridType.name.replace("_", " ")
                             ) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     GridType.entries.take(4).forEach { gt ->
-                                        FlagshipSmallChip(
+                                        SamsungSmallChip(
                                             label = when (gt) {
                                                 GridType.NONE -> "Off"
                                                 GridType.THIRDS -> "3x3"
@@ -383,17 +380,208 @@ fun SettingsDrawer(
                                     }
                                 }
                             }
+
+                            SamsungDivider()
+
+                            // Refocus Burst Planes
+                            SamsungSwitchItem(
+                                icon = Icons.Outlined.FilterCenterFocus,
+                                title = "Refocus Photo Mode",
+                                subtitle = "Multi-plane focus bracketing for post-capture refocusing",
+                                checked = isRefocusPhotoEnabled,
+                                onCheckedChange = onRefocusPhotoToggle
+                            )
+
+                            if (isRefocusPhotoEnabled) {
+                                SamsungDivider()
+                                SamsungRowItem(
+                                    icon = Icons.Outlined.Layers,
+                                    title = "Focus Planes",
+                                    subtitle = "$refocusFrameCount focus planes captured per burst"
+                                ) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        listOf(5, 8, 12, 15).forEach { count ->
+                                            SamsungSmallChip(
+                                                label = "${count}p",
+                                                isSelected = refocusFrameCount == count,
+                                                onClick = { onRefocusFrameCountChange(count) }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
 
-                // 2. VIDEO & AUDIO
-                if (selectedFilterCategory == FlagshipCategory.ALL || selectedFilterCategory == FlagshipCategory.VIDEO) {
+                // 2. PHOTO MODE PROCESSING PIPELINES
+                if (selectedFilterCategory == FlagshipCategory.ALL || selectedFilterCategory == FlagshipCategory.PROCESSING) {
                     item {
-                        FlagshipSectionHeader("VIDEO & AUDIO")
-                        FlagshipCard {
+                        SamsungSectionHeader("PHOTO PROCESSING PIPELINES")
+                        SamsungCard {
+                            // Master Toggle
+                            SamsungSwitchItem(
+                                icon = Icons.Outlined.AutoFixHigh,
+                                title = "Custom ISP Image Pipeline",
+                                subtitle = "Hardware-accelerated color science & tone-mapping engine",
+                                checked = isCustomPipelineEnabled,
+                                onCheckedChange = onCustomPipelineToggle
+                            )
+
+                            if (isCustomPipelineEnabled) {
+                                SamsungDivider()
+
+                                // Active Preset Selector
+                                SamsungRowItem(
+                                    icon = Icons.Outlined.Palette,
+                                    title = "Pipeline Color Science",
+                                    subtitle = activePipelinePreset.name
+                                ) {
+                                    // Row with chips for top presets
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        com.example.camera.pipeline.model.PipelinePreset.BUILT_IN_PRESETS.take(4).forEach { preset ->
+                                            SamsungSmallChip(
+                                                label = preset.name,
+                                                isSelected = activePipelinePreset.id == preset.id,
+                                                onClick = { onSelectPipelinePreset(preset) }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                SamsungDivider()
+
+                                // Open Pipeline Studio Action
+                                SamsungActionItem(
+                                    icon = Icons.Outlined.Tune,
+                                    title = "Open Processing Studio",
+                                    subtitle = "Adjust curves, sharpening, chroma denoise & tone mapping",
+                                    actionLabel = "Configure",
+                                    onClick = onOpenPipelineStudio
+                                )
+
+                                SamsungDivider()
+
+                                // Before / After Compare Action
+                                SamsungActionItem(
+                                    icon = Icons.Outlined.Compare,
+                                    title = "Before / After Compare View",
+                                    subtitle = "Side-by-side split screen of sensor RAW vs processed output",
+                                    actionLabel = "View",
+                                    onClick = onOpenBeforeAfter
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 3. MAIN CAMERA STABILIZATION
+                if (selectedFilterCategory == FlagshipCategory.ALL || selectedFilterCategory == FlagshipCategory.STABILIZATION) {
+                    item {
+                        SamsungSectionHeader("MAIN CAMERA STABILIZATION")
+                        SamsungCard {
+                            // Main Camera Stabilization Mode Selection
+                            SamsungRowItem(
+                                icon = Icons.Outlined.VideoStable,
+                                title = "Main Camera Stabilization",
+                                subtitle = mainCameraStabilizationMode.title
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    listOf(
+                                        MainCameraStabilizationMode.HYBRID_OIS_EIS,
+                                        MainCameraStabilizationMode.EIS_ONLY,
+                                        MainCameraStabilizationMode.OIS_ONLY,
+                                        MainCameraStabilizationMode.ULTRA,
+                                        MainCameraStabilizationMode.OFF
+                                    ).forEach { mode ->
+                                        SamsungSmallChip(
+                                            label = when (mode) {
+                                                MainCameraStabilizationMode.HYBRID_OIS_EIS -> "OIS+EIS"
+                                                MainCameraStabilizationMode.EIS_ONLY -> "EIS Only"
+                                                MainCameraStabilizationMode.OIS_ONLY -> "OIS Only"
+                                                MainCameraStabilizationMode.ULTRA -> "Ultra"
+                                                MainCameraStabilizationMode.OFF -> "Off"
+                                            },
+                                            isSelected = mainCameraStabilizationMode == mode,
+                                            onClick = { onMainCameraStabilizationModeSelected(mode) }
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Info badge explaining active synchronization
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFFEFF6FF))
+                                    .border(1.dp, Color(0xFFBFDBFE), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = when (mainCameraStabilizationMode) {
+                                        MainCameraStabilizationMode.HYBRID_OIS_EIS ->
+                                            "✓ Synchronized OIS + EIS: Gyroscope frame-sync locked at 500Hz. Eliminates micro-jitter and motion blur."
+                                        MainCameraStabilizationMode.EIS_ONLY ->
+                                            "✓ EIS Only: Digital sensor stabilization active. Optical floating coil locked to prevent conflict."
+                                        MainCameraStabilizationMode.OIS_ONLY ->
+                                            "✓ OIS Only: Pure physical voice-coil stabilization. No sensor crop or digital processing."
+                                        MainCameraStabilizationMode.ULTRA ->
+                                            "✓ Ultra Action Steady: Super-wide gyro EIS for intense action, sports, and running."
+                                        MainCameraStabilizationMode.OFF ->
+                                            "✕ Stabilization Off: Native raw sensor readout without motion compensation."
+                                    },
+                                    color = Color(0xFF1D4ED8),
+                                    fontSize = 10.5.sp,
+                                    lineHeight = 14.sp
+                                )
+                            }
+
+                            SamsungDivider()
+
+                            // Individual OIS Toggle
+                            SamsungSwitchItem(
+                                icon = Icons.Outlined.Camera,
+                                title = "Optical Image Stabilization (OIS)",
+                                subtitle = if (capabilities.supportsOis) "Physical voice-coil floating lens stabilization" else "Sensor does not have hardware OIS coil",
+                                checked = hybridStabilizationConfig.isOisPreferred && capabilities.supportsOis,
+                                enabled = capabilities.supportsOis,
+                                onCheckedChange = onOisToggle
+                            )
+
+                            SamsungDivider()
+
+                            // Individual Video EIS Toggle
+                            SamsungSwitchItem(
+                                icon = Icons.Outlined.Videocam,
+                                title = "Electronic Video Stabilization (EIS)",
+                                subtitle = "Digital sensor margin motion compensation",
+                                checked = isVideoStabilizationEnabled && hybridStabilizationConfig.isEisPreferred,
+                                onCheckedChange = onStabilizationToggle
+                            )
+
+                            SamsungDivider()
+
+                            // Ultra Action Steady Toggle
+                            SamsungSwitchItem(
+                                icon = Icons.Outlined.DirectionsRun,
+                                title = "Ultra Action Steady",
+                                subtitle = "Wide-angle action stabilization for intense movement",
+                                checked = hybridStabilizationConfig.isUltraStabilizationEnabled,
+                                onCheckedChange = { onUltraStabilizationToggle() }
+                            )
+                        }
+                    }
+                }
+
+                // 4. VIDEOS & AUDIO
+                if (selectedFilterCategory == FlagshipCategory.ALL || selectedFilterCategory == FlagshipCategory.VIDEOS) {
+                    item {
+                        SamsungSectionHeader("VIDEOS & AUDIO")
+                        SamsungCard {
                             // Video Resolution
-                            FlagshipRowItem(
+                            SamsungRowItem(
                                 icon = Icons.Outlined.Hd,
                                 title = "Video Resolution",
                                 subtitle = selectedVideoResolution?.let { "${it.width}x${it.height}" } ?: "4K UHD"
@@ -403,32 +591,32 @@ fun SettingsDrawer(
                                     val is1080 = selectedVideoResolution?.width == 1920
                                     val is720 = selectedVideoResolution?.width == 1280
 
-                                    FlagshipSmallChip("4K", is4k) {
+                                    SamsungSmallChip("4K", is4k) {
                                         capabilities.supportedVideoResolutions.firstOrNull { it.width == 3840 }
                                             ?.let { onVideoResolutionSelected(it) }
                                     }
-                                    FlagshipSmallChip("1080p", is1080) {
+                                    SamsungSmallChip("1080p", is1080) {
                                         capabilities.supportedVideoResolutions.firstOrNull { it.width == 1920 }
                                             ?.let { onVideoResolutionSelected(it) }
                                     }
-                                    FlagshipSmallChip("720p", is720) {
+                                    SamsungSmallChip("720p", is720) {
                                         capabilities.supportedVideoResolutions.firstOrNull { it.width == 1280 }
                                             ?.let { onVideoResolutionSelected(it) }
                                     }
                                 }
                             }
 
-                            FlagshipDivider()
+                            SamsungDivider()
 
                             // Frame Rate
-                            FlagshipRowItem(
+                            SamsungRowItem(
                                 icon = Icons.Outlined.Speed,
-                                title = "Framerate",
+                                title = "Video Framerate",
                                 subtitle = "$videoFps frames per second"
                             ) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     listOf(24, 30, 60).forEach { fps ->
-                                        FlagshipSmallChip(
+                                        SamsungSmallChip(
                                             label = "${fps}fps",
                                             isSelected = videoFps == fps,
                                             onClick = { onVideoFpsSelected(fps) }
@@ -437,17 +625,17 @@ fun SettingsDrawer(
                                 }
                             }
 
-                            FlagshipDivider()
+                            SamsungDivider()
 
                             // Video Codec
-                            FlagshipRowItem(
+                            SamsungRowItem(
                                 icon = Icons.Outlined.Code,
                                 title = "Video Codec",
                                 subtitle = if (videoCodec == "HEVC") "HEVC / H.265 (High Efficiency)" else "H.264 (Maximum Compatibility)"
                             ) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     listOf("HEVC", "AVC").forEach { codec ->
-                                        FlagshipSmallChip(
+                                        SamsungSmallChip(
                                             label = codec,
                                             isSelected = videoCodec == codec,
                                             onClick = { onVideoCodecSelected(codec) }
@@ -456,10 +644,40 @@ fun SettingsDrawer(
                                 }
                             }
 
-                            FlagshipDivider()
+                            SamsungDivider()
+
+                            // Cinema Log Profile
+                            SamsungRowItem(
+                                icon = Icons.Outlined.MovieFilter,
+                                title = "Cinema Log Curve",
+                                subtitle = "${cinemaConfig.colorProfile.label} (${cinemaConfig.logBitDepth.label})"
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    listOf(
+                                        CinemaColorProfile.REC_709,
+                                        CinemaColorProfile.FLAT_LOG,
+                                        CinemaColorProfile.HLG,
+                                        CinemaColorProfile.REC_2020
+                                    ).forEach { profile ->
+                                        SamsungSmallChip(
+                                            label = when (profile) {
+                                                CinemaColorProfile.REC_709 -> "Rec.709"
+                                                CinemaColorProfile.FLAT_LOG -> "Flat Log"
+                                                CinemaColorProfile.HLG -> "HLG"
+                                                CinemaColorProfile.REC_2020 -> "Rec.2020"
+                                                else -> profile.label
+                                            },
+                                            isSelected = cinemaConfig.colorProfile == profile,
+                                            onClick = { onCinemaConfigChange(cinemaConfig.copy(colorProfile = profile)) }
+                                        )
+                                    }
+                                }
+                            }
+
+                            SamsungDivider()
 
                             // Audio Recording
-                            FlagshipSwitchItem(
+                            SamsungSwitchItem(
                                 icon = Icons.Outlined.Mic,
                                 title = "Record Audio",
                                 subtitle = if (isAudioEnabled) "Stereo microphone capture" else "Video muted",
@@ -468,13 +686,36 @@ fun SettingsDrawer(
                             )
 
                             if (isAudioEnabled) {
-                                FlagshipDivider()
+                                SamsungDivider()
+
+                                // Audio Source
+                                SamsungRowItem(
+                                    icon = Icons.Outlined.SettingsVoice,
+                                    title = "Audio Source",
+                                    subtitle = audioSource
+                                ) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        listOf("CAMCORDER", "MIC", "BLUETOOTH").forEach { src ->
+                                            SamsungSmallChip(
+                                                label = when (src) {
+                                                    "CAMCORDER" -> "Built-in"
+                                                    "MIC" -> "Ext Mic"
+                                                    else -> "Bluetooth"
+                                                },
+                                                isSelected = audioSource == src,
+                                                onClick = { onAudioSourceSelected(src) }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                SamsungDivider()
 
                                 // Wind Noise Reduction
-                                FlagshipSwitchItem(
+                                SamsungSwitchItem(
                                     icon = Icons.Outlined.Air,
                                     title = "Wind Noise Reduction",
-                                    subtitle = "Hardware microphone frequency filtering",
+                                    subtitle = "Hardware high-pass frequency filter for outdoor wind",
                                     checked = windNoiseReduction,
                                     onCheckedChange = onWindNoiseReductionToggle
                                 )
@@ -483,126 +724,162 @@ fun SettingsDrawer(
                     }
                 }
 
-                // 3. PROCESSING & AI
-                if (selectedFilterCategory == FlagshipCategory.ALL || selectedFilterCategory == FlagshipCategory.PROCESSING) {
+                // 5. UI CUSTOMIZATION & LAYOUT
+                if (selectedFilterCategory == FlagshipCategory.ALL || selectedFilterCategory == FlagshipCategory.UI_CUSTOMIZATION) {
                     item {
-                        FlagshipSectionHeader("PROCESSING & AI")
-                        FlagshipCard {
-                            // Optical Blur Guided Portrait
-                            FlagshipSwitchItem(
-                                icon = Icons.Outlined.Portrait,
-                                title = "Optical Blur Portrait",
-                                subtitle = "Optical defocus estimation & fine hair matting",
-                                checked = portraitConfig.opticalBlurGuided,
-                                onCheckedChange = { onPortraitConfigChange(portraitConfig.copy(opticalBlurGuided = it)) }
-                            )
-
-                            FlagshipDivider()
-
-                            // AI Super-Resolution Zoom
-                            FlagshipSwitchItem(
-                                icon = Icons.Outlined.ZoomIn,
-                                title = "AI Super-Resolution Zoom",
-                                subtitle = "Multi-frame subpixel detail enhancement",
-                                checked = isHighQualityZoomEnabled,
-                                onCheckedChange = onHighQualityZoomToggle
-                            )
-
-                            FlagshipDivider()
-
-                            // Auto HDR
-                            FlagshipSwitchItem(
-                                icon = Icons.Outlined.HdrOn,
-                                title = "Auto HDR Fusion",
-                                subtitle = "Zero-shutter-lag multi-exposure dynamic range",
-                                checked = isAutoHdrEnabled,
-                                onCheckedChange = onAutoHdrToggle
-                            )
-
-                            FlagshipDivider()
-
-                            // Ultra Action Stabilization
-                            FlagshipSwitchItem(
-                                icon = Icons.Outlined.MotionPhotosOn,
-                                title = "Ultra Action Stabilization",
-                                subtitle = "Rock-steady wide gyro EIS for sports & fast movement",
-                                checked = hybridStabilizationConfig.isUltraStabilizationEnabled,
-                                onCheckedChange = { onUltraStabilizationToggle() }
-                            )
-
-                            FlagshipDivider()
-
-                            // Optical Image Stabilization (OIS)
-                            FlagshipSwitchItem(
-                                icon = Icons.Outlined.Camera,
-                                title = "Optical Image Stabilization (OIS)",
-                                subtitle = if (capabilities.supportsOis) "Physical voice-coil lens stabilization" else "Sensor does not support hardware OIS",
-                                checked = hybridStabilizationConfig.isOisPreferred && capabilities.supportsOis,
-                                enabled = capabilities.supportsOis,
-                                onCheckedChange = onOisToggle
-                            )
-
-                            FlagshipDivider()
-
-                            // Video Stabilization (EIS)
-                            FlagshipSwitchItem(
-                                icon = Icons.Outlined.VideoStable,
-                                title = "Video Stabilization (EIS)",
-                                subtitle = "ISP digital sensor frame margin compensation",
-                                checked = isVideoStabilizationEnabled && hybridStabilizationConfig.isEisPreferred,
-                                onCheckedChange = {
-                                    onStabilizationToggle(it)
-                                    onHybridStabilizationChange(hybridStabilizationConfig.copy(isEisPreferred = it, isHybridEnabled = it))
-                                }
-                            )
-
-                            FlagshipDivider()
-
-                            // Cinema Log Profile
-                            FlagshipRowItem(
-                                icon = Icons.Outlined.MovieFilter,
-                                title = "Cinema Log Curve",
-                                subtitle = "${cinemaConfig.colorProfile.label} (${cinemaConfig.logBitDepth.label})"
+                        SamsungSectionHeader("UI CUSTOMIZATION & LAYOUT")
+                        SamsungCard {
+                            // Template Presets
+                            SamsungRowItem(
+                                icon = Icons.Outlined.ViewQuilt,
+                                title = "Camera UI Theme",
+                                subtitle = uiCustomizationState.selectedTemplate.title
                             ) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    listOf(CinemaColorProfile.REC_709, CinemaColorProfile.FLAT_LOG, CinemaColorProfile.HLG).forEach { profile ->
-                                        FlagshipSmallChip(
-                                            label = profile.label,
-                                            isSelected = cinemaConfig.colorProfile == profile,
-                                            onClick = { onCinemaConfigChange(cinemaConfig.copy(colorProfile = profile)) }
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    listOf(
+                                        UiTemplateType.SAMSUNG,
+                                        UiTemplateType.IPHONE,
+                                        UiTemplateType.STOCK_PIXEL,
+                                        UiTemplateType.MINIMAL_PRO
+                                    ).forEach { template ->
+                                        SamsungSmallChip(
+                                            label = when (template) {
+                                                UiTemplateType.SAMSUNG -> "One UI"
+                                                UiTemplateType.IPHONE -> "iOS"
+                                                UiTemplateType.STOCK_PIXEL -> "Pixel"
+                                                UiTemplateType.MINIMAL_PRO -> "Leica"
+                                                else -> template.title
+                                            },
+                                            isSelected = uiCustomizationState.selectedTemplate == template,
+                                            onClick = { onSelectTemplate(template) }
                                         )
                                     }
                                 }
                             }
+
+                            SamsungDivider()
+
+                            // Custom UI Studio Action
+                            SamsungActionItem(
+                                icon = Icons.Outlined.DesignServices,
+                                title = "Customize Camera UI Studio",
+                                subtitle = "Rearrange top bar, shutter, zoom slider, histograms & audio meters",
+                                actionLabel = "Open Studio",
+                                onClick = onOpenCustomUiStudio
+                            )
+
+                            SamsungDivider()
+
+                            // Reset UI Layout
+                            SamsungActionItem(
+                                icon = Icons.Outlined.RestartAlt,
+                                title = "Reset Camera Layout",
+                                subtitle = "Restore default One UI layout positions for all camera modes",
+                                actionLabel = "Reset",
+                                onClick = { onResetAllToTemplate(UiTemplateType.SAMSUNG) }
+                            )
                         }
                     }
                 }
 
-                // 4. CONTROLS & GESTURES
+                // 6. INTELLIGENT FEATURES
+                if (selectedFilterCategory == FlagshipCategory.ALL || selectedFilterCategory == FlagshipCategory.INTELLIGENT) {
+                    item {
+                        SamsungSectionHeader("INTELLIGENT FEATURES")
+                        SamsungCard {
+                            // AI Super-Resolution Zoom
+                            SamsungSwitchItem(
+                                icon = Icons.Outlined.ZoomIn,
+                                title = "AI Super-Resolution Zoom",
+                                subtitle = "Multi-frame subpixel detail reconstruction (Lanczos-3)",
+                                checked = isHighQualityZoomEnabled,
+                                onCheckedChange = onHighQualityZoomToggle
+                            )
+
+                            if (isHighQualityZoomEnabled) {
+                                SamsungDivider()
+                                SamsungRowItem(
+                                    icon = Icons.Outlined.ShutterSpeed,
+                                    title = "Zoom Clarity Quality",
+                                    subtitle = zoomProcessingQuality.label
+                                ) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        com.example.camera.zoom.ZoomProcessingQuality.entries.forEach { q ->
+                                            SamsungSmallChip(
+                                                label = when (q) {
+                                                    com.example.camera.zoom.ZoomProcessingQuality.FAST -> "Speed"
+                                                    com.example.camera.zoom.ZoomProcessingQuality.BALANCED -> "Balanced"
+                                                    com.example.camera.zoom.ZoomProcessingQuality.MAXIMUM -> "Clarity"
+                                                },
+                                                isSelected = zoomProcessingQuality == q,
+                                                onClick = { onZoomProcessingQualitySelect(q) }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            SamsungDivider()
+
+                            // Optical Defocus Portrait
+                            SamsungSwitchItem(
+                                icon = Icons.Outlined.Portrait,
+                                title = "Optical Defocus Guided Portrait",
+                                subtitle = "Optical blur estimation and fine hair matting",
+                                checked = portraitConfig.opticalBlurGuided,
+                                onCheckedChange = { onPortraitConfigChange(portraitConfig.copy(opticalBlurGuided = it)) }
+                            )
+
+                            SamsungDivider()
+
+                            // AI Auto-Framing
+                            SamsungSwitchItem(
+                                icon = Icons.Outlined.CropFree,
+                                title = "AI Auto-Framing",
+                                subtitle = "Smoothly crop and follow detected subjects automatically",
+                                checked = isAiAutoFramingEnabled,
+                                onCheckedChange = onAiAutoFramingToggle
+                            )
+
+                            SamsungDivider()
+
+                            // Tap to Focus & Spot Metering
+                            SamsungSwitchItem(
+                                icon = Icons.Outlined.CenterFocusStrong,
+                                title = "Tap to Focus & Spot Metering",
+                                subtitle = "Lock focus point and calculate exposure from touch target",
+                                checked = tapFocusConfig.isTapToFocusEnabled,
+                                onCheckedChange = { onTapFocusConfigChange(tapFocusConfig.copy(isTapToFocusEnabled = it)) }
+                            )
+                        }
+                    }
+                }
+
+                // 7. CONTROLS & FEEDBACK
                 if (selectedFilterCategory == FlagshipCategory.ALL || selectedFilterCategory == FlagshipCategory.CONTROLS) {
                     item {
-                        FlagshipSectionHeader("CONTROLS & GESTURES")
-                        FlagshipCard {
+                        SamsungSectionHeader("CONTROLS & FEEDBACK")
+                        SamsungCard {
                             // Save Selfie As Previewed
-                            FlagshipSwitchItem(
+                            SamsungSwitchItem(
                                 icon = Icons.Outlined.FlipCameraAndroid,
-                                title = "Save Selfie As Previewed",
-                                subtitle = "Mirror front camera photos",
+                                title = "Save Selfies as Previewed",
+                                subtitle = "Save front camera photos without flipping horizontally",
                                 checked = saveSelfieAsPreviewed,
                                 onCheckedChange = onSaveSelfieAsPreviewedToggle
                             )
 
-                            FlagshipDivider()
+                            SamsungDivider()
 
                             // Volume Key Action
-                            FlagshipRowItem(
+                            SamsungRowItem(
                                 icon = Icons.Outlined.VolumeUp,
                                 title = "Volume Key Action",
                                 subtitle = volumeKeyAction
                             ) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     listOf("SHUTTER", "ZOOM", "VOLUME").forEach { action ->
-                                        FlagshipSmallChip(
+                                        SamsungSmallChip(
                                             label = action,
                                             isSelected = volumeKeyAction == action,
                                             onClick = { onVolumeKeyActionSelected(action) }
@@ -611,17 +888,17 @@ fun SettingsDrawer(
                                 }
                             }
 
-                            FlagshipDivider()
+                            SamsungDivider()
 
                             // Double-Tap Action
-                            FlagshipRowItem(
+                            SamsungRowItem(
                                 icon = Icons.Outlined.TouchApp,
                                 title = "Double-Tap Action",
                                 subtitle = if (doubleTapAction == "FLIP") "Switch Front/Rear" else doubleTapAction
                             ) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     listOf("FLIP", "ZOOM", "NONE").forEach { act ->
-                                        FlagshipSmallChip(
+                                        SamsungSmallChip(
                                             label = act,
                                             isSelected = doubleTapAction == act,
                                             onClick = { onDoubleTapActionSelected(act) }
@@ -630,17 +907,17 @@ fun SettingsDrawer(
                                 }
                             }
 
-                            FlagshipDivider()
+                            SamsungDivider()
 
                             // Shutter Feedback
-                            FlagshipRowItem(
+                            SamsungRowItem(
                                 icon = Icons.Outlined.Vibration,
                                 title = "Shutter Feedback",
                                 subtitle = shutterFeedback.replace("_", " ")
                             ) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     listOf("SOUND_AND_HAPTIC", "HAPTIC_ONLY", "SILENT").forEach { mode ->
-                                        FlagshipSmallChip(
+                                        SamsungSmallChip(
                                             label = when (mode) {
                                                 "SOUND_AND_HAPTIC" -> "Both"
                                                 "HAPTIC_ONLY" -> "Haptic"
@@ -652,35 +929,24 @@ fun SettingsDrawer(
                                     }
                                 }
                             }
-
-                            FlagshipDivider()
-
-                            // Tap to Focus
-                            FlagshipSwitchItem(
-                                icon = Icons.Outlined.CenterFocusStrong,
-                                title = "Tap to Focus & Meter",
-                                subtitle = "Auto-exposure spot metering on focus target",
-                                checked = tapFocusConfig.isTapToFocusEnabled,
-                                onCheckedChange = { onTapFocusConfigChange(tapFocusConfig.copy(isTapToFocusEnabled = it)) }
-                            )
                         }
                     }
                 }
 
-                // 5. ADVANCED & LABS
+                // 8. ADVANCED & LABS
                 if (selectedFilterCategory == FlagshipCategory.ALL || selectedFilterCategory == FlagshipCategory.ADVANCED) {
                     item {
-                        FlagshipSectionHeader("ADVANCED & LABS")
-                        FlagshipCard {
+                        SamsungSectionHeader("ADVANCED & LABS")
+                        SamsungCard {
                             // Anti-Banding
-                            FlagshipRowItem(
+                            SamsungRowItem(
                                 icon = Icons.Outlined.WbIncandescent,
-                                title = "Anti-Banding",
-                                subtitle = "Flicker reduction frequency ($antibandingMode)"
+                                title = "Anti-Banding (Flicker)",
+                                subtitle = "Frequency flicker elimination ($antibandingMode)"
                             ) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     listOf("AUTO", "50HZ", "60HZ").forEach { mode ->
-                                        FlagshipSmallChip(
+                                        SamsungSmallChip(
                                             label = mode,
                                             isSelected = antibandingMode == mode,
                                             onClick = { onAntibandingModeSelected(mode) }
@@ -689,17 +955,17 @@ fun SettingsDrawer(
                                 }
                             }
 
-                            FlagshipDivider()
+                            SamsungDivider()
 
                             // Viewfinder Refresh Rate
-                            FlagshipRowItem(
+                            SamsungRowItem(
                                 icon = Icons.Outlined.Refresh,
-                                title = "Viewfinder Refresh Rate",
-                                subtitle = "${viewfinderFps}Hz preview stream"
+                                title = "Viewfinder Framerate",
+                                subtitle = "${viewfinderFps}Hz smooth preview"
                             ) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     listOf(60, 120).forEach { rate ->
-                                        FlagshipSmallChip(
+                                        SamsungSmallChip(
                                             label = "${rate}Hz",
                                             isSelected = viewfinderFps == rate,
                                             onClick = { onViewfinderFpsSelected(rate) }
@@ -708,44 +974,55 @@ fun SettingsDrawer(
                                 }
                             }
 
-                            FlagshipDivider()
+                            SamsungDivider()
 
-                            // Thermal ISP Protection
-                            FlagshipSwitchItem(
+                            // Tilt Horizon Leveler
+                            SamsungSwitchItem(
+                                icon = Icons.Outlined.ScreenRotation,
+                                title = "Gyro Horizon Leveler",
+                                subtitle = "Real-time gravity leveling guide line",
+                                checked = horizonLeveler,
+                                onCheckedChange = onHorizonLevelerToggle
+                            )
+
+                            SamsungDivider()
+
+                            // Thermal Protection
+                            SamsungSwitchItem(
                                 icon = Icons.Outlined.Thermostat,
                                 title = "Thermal Protection",
-                                subtitle = "Dynamically throttle ISP load during overheating",
+                                subtitle = "Dynamically throttle ISP load during prolonged recording",
                                 checked = thermalProtection,
                                 onCheckedChange = onThermalProtectionToggle
                             )
 
-                            FlagshipDivider()
+                            SamsungDivider()
 
-                            // Horizon Leveler
-                            FlagshipSwitchItem(
-                                icon = Icons.Outlined.ScreenRotation,
-                                title = "Tilt Horizon Leveler",
-                                subtitle = "Sensor gyroscope alignment indicator",
-                                checked = horizonLeveler,
-                                onCheckedChange = onHorizonLevelerToggle
+                            // Motorola Instant Camera Switching
+                            SamsungSwitchItem(
+                                icon = Icons.Outlined.Cameraswitch,
+                                title = "Keep Ultra-Wide Sensor Ready",
+                                subtitle = "Background standby stream for instant lens transitions",
+                                checked = instantSwitchState.isKeepUltraWideReady,
+                                onCheckedChange = onKeepUltraWideReadyToggle
                             )
                         }
                     }
                 }
 
-                // 6. GENERAL / ABOUT
+                // 9. GENERAL / ABOUT & RESET
                 if (selectedFilterCategory == FlagshipCategory.ALL || selectedFilterCategory == FlagshipCategory.ABOUT) {
                     item {
-                        FlagshipSectionHeader("GENERAL / ABOUT")
-                        FlagshipCard {
-                            // Camera HAL Info
-                            FlagshipRowItem(
+                        SamsungSectionHeader("ABOUT & DIAGNOSTICS")
+                        SamsungCard {
+                            // Hardware Diagnostic Info
+                            SamsungRowItem(
                                 icon = Icons.Outlined.Info,
-                                title = "Hardware Support",
-                                subtitle = "Camera2 API · ${availableLenses.size} detected lenses · ${if (capabilities.supportsRaw) "RAW supported" else "Standard ISP"}"
+                                title = "Camera Hardware",
+                                subtitle = "Camera2 Level 3 · ${availableLenses.size} detected lenses · ${if (capabilities.supportsOis) "OIS Present" else "No OIS"}"
                             )
 
-                            FlagshipDivider()
+                            SamsungDivider()
 
                             // Reset Settings
                             Row(
@@ -762,28 +1039,28 @@ fun SettingsDrawer(
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .size(30.dp)
+                                            .size(28.dp)
                                             .clip(CircleShape)
-                                            .background(Color(0xFF2C1515)),
+                                            .background(Color(0xFFFEE2E2)),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
                                             imageVector = Icons.Outlined.RestartAlt,
                                             contentDescription = null,
-                                            tint = Color(0xFFEF4444),
-                                            modifier = Modifier.size(16.dp)
+                                            tint = Color(0xFFDC2626),
+                                            modifier = Modifier.size(15.dp)
                                         )
                                     }
                                     Column {
                                         Text(
-                                            text = "Reset All Settings",
-                                            color = Color(0xFFEF4444),
+                                            text = "Reset Settings",
+                                            color = Color(0xFFDC2626),
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.SemiBold
                                         )
                                         Text(
-                                            text = "Restore camera parameters to factory defaults",
-                                            color = Color(0xFF9CA3AF),
+                                            text = "Restore all camera parameters to factory defaults",
+                                            color = Color(0xFF64748B),
                                             fontSize = 11.sp
                                         )
                                     }
@@ -791,7 +1068,7 @@ fun SettingsDrawer(
                                 Icon(
                                     imageVector = Icons.Default.ChevronRight,
                                     contentDescription = null,
-                                    tint = Color(0xFF6B7280),
+                                    tint = Color(0xFF94A3B8),
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -805,20 +1082,20 @@ fun SettingsDrawer(
     if (showResetDialog) {
         AlertDialog(
             onDismissRequest = { showResetDialog = false },
-            containerColor = Color(0xFF1C1D22),
+            containerColor = Color.White,
             title = {
                 Text(
-                    text = "Reset Settings?",
-                    color = Color.White,
-                    fontSize = 17.sp,
+                    text = "Reset Camera Settings?",
+                    color = Color(0xFF0F172A),
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )
             },
             text = {
                 Text(
-                    text = "This will restore all photo, video, processing, and control preferences back to factory defaults.",
-                    color = Color(0xFFD1D5DB),
-                    fontSize = 13.5.sp
+                    text = "This will restore photo, video, processing pipeline, stabilization, and control preferences back to factory defaults.",
+                    color = Color(0xFF475569),
+                    fontSize = 13.sp
                 )
             },
             confirmButton = {
@@ -828,12 +1105,12 @@ fun SettingsDrawer(
                         showResetDialog = false
                     }
                 ) {
-                    Text("Reset", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                    Text("Reset", color = Color(0xFFDC2626), fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showResetDialog = false }) {
-                    Text("Cancel", color = Color(0xFF9CA3AF))
+                    Text("Cancel", color = Color(0xFF64748B), fontSize = 13.sp)
                 }
             }
         )
@@ -841,23 +1118,24 @@ fun SettingsDrawer(
 }
 
 @Composable
-private fun FlagshipSectionHeader(title: String) {
+private fun SamsungSectionHeader(title: String) {
     Text(
         text = title,
-        color = Color(0xFF9CA3AF),
-        fontSize = 11.sp,
+        color = Color(0xFF1D4ED8),
+        fontSize = 10.5.sp,
         fontWeight = FontWeight.Bold,
-        letterSpacing = 1.sp,
-        modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+        letterSpacing = 0.8.sp,
+        modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
     )
 }
 
 @Composable
-private fun FlagshipCard(content: @Composable ColumnScope.() -> Unit) {
+private fun SamsungCard(content: @Composable ColumnScope.() -> Unit) {
     Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = Color(0xFF1A1C22),
-        border = BorderStroke(1.dp, Color(0xFF272A34)),
+        shape = RoundedCornerShape(18.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        shadowElevation = 1.dp,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -868,16 +1146,16 @@ private fun FlagshipCard(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-private fun FlagshipDivider() {
+private fun SamsungDivider() {
     HorizontalDivider(
         modifier = Modifier.padding(horizontal = 14.dp),
         thickness = 0.6.dp,
-        color = Color(0xFF262933)
+        color = Color(0xFFF1F5F9)
     )
 }
 
 @Composable
-private fun FlagshipRowItem(
+private fun SamsungRowItem(
     icon: ImageVector,
     title: String,
     subtitle: String,
@@ -886,7 +1164,7 @@ private fun FlagshipRowItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = 14.dp, vertical = 9.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -897,43 +1175,114 @@ private fun FlagshipRowItem(
         ) {
             Box(
                 modifier = Modifier
-                    .size(30.dp)
+                    .size(28.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF232630)),
+                    .background(Color(0xFFEFF6FF)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = Color(0xFFFFD54F),
+                    tint = Color(0xFF1D4ED8),
                     modifier = Modifier.size(15.dp)
                 )
             }
             Column {
                 Text(
                     text = title,
-                    color = Color.White,
-                    fontSize = 13.sp,
+                    color = Color(0xFF0F172A),
+                    fontSize = 12.5.sp,
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
                     text = subtitle,
-                    color = Color(0xFF9CA3AF),
-                    fontSize = 11.sp,
+                    color = Color(0xFF64748B),
+                    fontSize = 10.5.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
         }
         if (action != null) {
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(6.dp))
             action()
         }
     }
 }
 
 @Composable
-private fun FlagshipSwitchItem(
+private fun SamsungActionItem(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    actionLabel: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFEFF6FF)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = Color(0xFF1D4ED8),
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+            Column {
+                Text(
+                    text = title,
+                    color = Color(0xFF0F172A),
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = subtitle,
+                    color = Color(0xFF64748B),
+                    fontSize = 10.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = actionLabel,
+                color = Color(0xFF1D4ED8),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = Color(0xFF1D4ED8),
+                modifier = Modifier.size(14.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SamsungSwitchItem(
     icon: ImageVector,
     title: String,
     subtitle: String,
@@ -945,7 +1294,7 @@ private fun FlagshipSwitchItem(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(enabled = enabled) { onCheckedChange(!checked) }
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .padding(horizontal = 14.dp, vertical = 7.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -956,29 +1305,29 @@ private fun FlagshipSwitchItem(
         ) {
             Box(
                 modifier = Modifier
-                    .size(30.dp)
+                    .size(28.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF232630)),
+                    .background(if (enabled) Color(0xFFEFF6FF) else Color(0xFFF1F5F9)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = if (enabled) Color(0xFFFFD54F) else Color(0xFF6B7280),
+                    tint = if (enabled) Color(0xFF1D4ED8) else Color(0xFF94A3B8),
                     modifier = Modifier.size(15.dp)
                 )
             }
             Column {
                 Text(
                     text = title,
-                    color = if (enabled) Color.White else Color(0xFF9CA3AF),
-                    fontSize = 13.sp,
+                    color = if (enabled) Color(0xFF0F172A) else Color(0xFF94A3B8),
+                    fontSize = 12.5.sp,
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
                     text = subtitle,
-                    color = if (enabled) Color(0xFF9CA3AF) else Color(0xFF6B7280),
-                    fontSize = 11.sp,
+                    color = if (enabled) Color(0xFF64748B) else Color(0xFFCBD5E1),
+                    fontSize = 10.5.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -989,39 +1338,37 @@ private fun FlagshipSwitchItem(
             onCheckedChange = if (enabled) onCheckedChange else null,
             enabled = enabled,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color(0xFF121316),
-                checkedTrackColor = Color(0xFFFFD54F),
-                uncheckedThumbColor = Color(0xFF9CA3AF),
-                uncheckedTrackColor = Color(0xFF272A34),
-                disabledCheckedTrackColor = Color(0xFF3F3A22),
-                disabledUncheckedTrackColor = Color(0xFF1F2128)
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFF1D4ED8),
+                uncheckedThumbColor = Color(0xFF94A3B8),
+                uncheckedTrackColor = Color(0xFFE2E8F0)
             ),
-            modifier = Modifier.scale(0.8f)
+            modifier = Modifier.scale(0.75f)
         )
     }
 }
 
 @Composable
-private fun FlagshipSmallChip(
+private fun SamsungSmallChip(
     label: String,
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = if (isSelected) Color(0xFF26210A) else Color(0xFF232630),
+        shape = RoundedCornerShape(12.dp),
+        color = if (isSelected) Color(0xFF1D4ED8) else Color(0xFFF1F5F9),
         border = BorderStroke(
             width = 1.dp,
-            color = if (isSelected) Color(0xFFFFD54F) else Color.Transparent
+            color = if (isSelected) Color(0xFF1D4ED8) else Color(0xFFE2E8F0)
         ),
         modifier = Modifier.clickable { onClick() }
     ) {
         Text(
             text = label,
-            color = if (isSelected) Color(0xFFFFD54F) else Color(0xFFD1D5DB),
-            fontSize = 10.5.sp,
+            color = if (isSelected) Color.White else Color(0xFF334155),
+            fontSize = 10.sp,
             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
         )
     }
 }

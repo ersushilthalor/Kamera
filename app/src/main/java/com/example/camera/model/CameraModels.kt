@@ -427,16 +427,34 @@ data class NightCaptureProgress(
     val statusText: String = "Hold device steady..."
 )
 
+enum class MainCameraStabilizationMode(val title: String, val subtitle: String) {
+    OFF("Off", "Stabilization disabled"),
+    OIS_ONLY("OIS Only", "Physical optical voice-coil stabilization only"),
+    EIS_ONLY("EIS Only", "Electronic image stabilization only (OIS off)"),
+    HYBRID_OIS_EIS("OIS + EIS", "Synchronized optical + electronic stabilization"),
+    ULTRA("Ultra Action", "Maximum gyro-compensated action stabilization")
+}
+
 data class HybridStabilizationConfig(
     val isHybridEnabled: Boolean = true,
     val isOisPreferred: Boolean = true,
     val isEisPreferred: Boolean = true,
     val isAdaptiveFpsLens: Boolean = true,
     val isUltraStabilizationEnabled: Boolean = false,
+    val isEisOnly: Boolean = false,
     val oisHardwareStatus: String = "Detecting",
     val eisHardwareStatus: String = "Detecting",
     val ultraStabilizationStatus: String = "Ready"
-)
+) {
+    val stabilizationMode: MainCameraStabilizationMode
+        get() = when {
+            isUltraStabilizationEnabled -> MainCameraStabilizationMode.ULTRA
+            isEisOnly || (!isOisPreferred && isEisPreferred) -> MainCameraStabilizationMode.EIS_ONLY
+            isOisPreferred && !isEisPreferred -> MainCameraStabilizationMode.OIS_ONLY
+            isHybridEnabled || (isOisPreferred && isEisPreferred) -> MainCameraStabilizationMode.HYBRID_OIS_EIS
+            else -> MainCameraStabilizationMode.OFF
+        }
+}
 
 data class TapFocusConfig(
     val isTapToFocusExposureEnabled: Boolean = true,

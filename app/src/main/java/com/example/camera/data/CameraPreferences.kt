@@ -455,6 +455,10 @@ class CameraPreferences(context: Context) {
         get() = prefs.getBoolean("pref_ultra_stabilization", false)
         set(value) = prefs.edit().putBoolean("pref_ultra_stabilization", value).apply()
 
+    var isEisOnly: Boolean
+        get() = prefs.getBoolean("pref_eis_only", false)
+        set(value) = prefs.edit().putBoolean("pref_eis_only", value).apply()
+
     // Tap to Focus & Exposure Preferences
     var isTapToFocusExposureEnabled: Boolean
         get() = prefs.getBoolean("pref_tap_focus_exposure", true)
@@ -517,7 +521,8 @@ class CameraPreferences(context: Context) {
             isOisPreferred = isOisPreferred,
             isEisPreferred = isEisPreferred,
             isAdaptiveFpsLens = isAdaptiveFpsLensStabilization,
-            isUltraStabilizationEnabled = isUltraStabilizationEnabled
+            isUltraStabilizationEnabled = isUltraStabilizationEnabled,
+            isEisOnly = isEisOnly
         )
         set(value) {
             isHybridStabilizationEnabled = value.isHybridEnabled
@@ -525,6 +530,7 @@ class CameraPreferences(context: Context) {
             isEisPreferred = value.isEisPreferred
             isAdaptiveFpsLensStabilization = value.isAdaptiveFpsLens
             isUltraStabilizationEnabled = value.isUltraStabilizationEnabled
+            isEisOnly = value.isEisOnly
         }
 
     var uiCustomizationState: UiCustomizationState

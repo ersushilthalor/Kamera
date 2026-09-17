@@ -47,8 +47,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.camera.model.CameraMode
+import com.example.camera.model.CinemaColorProfile
+import com.example.camera.model.CinemaConfig
 import com.example.camera.model.CinematicLut
 import com.example.camera.model.GridType
+import com.example.camera.model.LogBitDepth
 import com.example.camera.model.PhotoFilter
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -71,6 +74,7 @@ fun Viewfinder(
     activePhotoFilter: PhotoFilter? = null,
     activeLut: CinematicLut? = null,
     isLutPreviewEnabled: Boolean = false,
+    cinemaConfig: CinemaConfig? = null,
     onSurfaceTextureAvailable: (SurfaceTexture?) -> Unit,
     onTapToFocus: (Offset, Float, Float) -> Unit,
     onZoomChange: (Float) -> Unit,
@@ -181,26 +185,113 @@ fun Viewfinder(
                             }
                         }
                     },
-                    update = {
-                        // SurfaceTexture lifecycle is handled by SurfaceTextureListener callbacks
+                    update = { textureView ->
+                        val effectiveLut = activeLut ?: cinemaConfig?.selectedLut
+                        val effectiveLutPreview = isLutPreviewEnabled || (cinemaConfig?.isLutPreviewEnabled == true)
+
+                        val colorMatrix = android.graphics.ColorMatrix()
+                        var hasFilter = false
+
+                        if (cameraMode == CameraMode.CINEMA && cinemaConfig != null && cinemaConfig.logBitDepth != LogBitDepth.OFF) {
+                            // 1. Log Profile characteristic preview
+                            when (cinemaConfig.colorProfile) {
+                                CinemaColorProfile.FLAT_LOG -> {
+                                    // True Flat Log: lifted milky shadow pedestal (+32 offset) and low contrast
+                                    val flatPedestal = android.graphics.ColorMatrix(floatArrayOf(
+                                        0.86f, 0f, 0f, 0f, 32f,
+                                        0f, 0.86f, 0f, 0f, 32f,
+                                        0f, 0f, 0.86f, 0f, 32f,
+                                        0f, 0f, 0f, 1f, 0f
+                                    ))
+                                    colorMatrix.postConcat(flatPedestal)
+                                    hasFilter = true
+                                }
+                                CinemaColorProfile.HLG -> {
+                                    // HLG: vibrant preserved realistic colors
+                                    val hlgSat = android.graphics.ColorMatrix()
+                                    hlgSat.setSaturation(1.22f)
+                                    colorMatrix.postConcat(hlgSat)
+                                    hasFilter = true
+                                }
+                                CinemaColorProfile.REC_2020 -> {
+                                    // Rec.2020: shadow lift to match scene
+                                    val recLift = android.graphics.ColorMatrix(floatArrayOf(
+                                        0.92f, 0f, 0f, 0f, 18f,
+                                        0f, 0.92f, 0f, 0f, 18f,
+                                        0f, 0f, 0.92f, 0f, 18f,
+                                        0f, 0f, 0f, 1f, 0f
+                                    ))
+                                    colorMatrix.postConcat(recLift)
+                                    hasFilter = true
+                                }
+                                else -> {}
+                            }
+
+                            // 2. User Saturation control (+/-)
+                            if (cinemaConfig.saturation != 1.0f) {
+                                val satMatrix = android.graphics.ColorMatrix()
+                                satMatrix.setSaturation(cinemaConfig.saturation)
+                                colorMatrix.postConcat(satMatrix)
+                                hasFilter = true
+                            }
+
+                            // 3. User Contrast control (+/-)
+                            if (cinemaConfig.contrast != 0.0f) {
+                                val c = 1.0f + (cinemaConfig.contrast * 0.4f)
+                                val t = (1.0f - c) * 128f
+                                val contrastMatrix = android.graphics.ColorMatrix(floatArrayOf(
+                                    c, 0f, 0f, 0f, t,
+                                    0f, c, 0f, 0f, t,
+                                    0f, 0f, c, 0f, t,
+                                    0f, 0f, 0f, 1f, 0f
+                                ))
+                                colorMatrix.postConcat(contrastMatrix)
+                                hasFilter = true
+                            }
+
+                            // 4. Cinematic LUT
+                            if (effectiveLutPreview && effectiveLut != null && effectiveLut != CinematicLut.NONE) {
+                                val lutMat = effectiveLut.toAndroidColorMatrix()
+                                if (lutMat != null) {
+                                    colorMatrix.postConcat(lutMat)
+                                    hasFilter = true
+                                }
+                            }
+                        } else if (cameraMode == CameraMode.PHOTO && activePhotoFilter != null && activePhotoFilter != PhotoFilter.ORIGINAL) {
+                            val filterMat = activePhotoFilter.toAndroidColorMatrix()
+                            if (filterMat != null) {
+                                colorMatrix.postConcat(filterMat)
+                                hasFilter = true
+                            }
+                        }
+
+                        if (hasFilter) {
+                            val paint = android.graphics.Paint()
+                            paint.colorFilter = android.graphics.ColorMatrixColorFilter(colorMatrix)
+                            textureView.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, paint)
+                        } else {
+                            textureView.setLayerType(android.view.View.LAYER_TYPE_NONE, null)
+                        }
                     },
                     modifier = Modifier.fillMaxSize()
                 )
 
                 // Optional Non-Destructive Live LUT / Filter Monitoring Badge
-                if (cameraMode == CameraMode.CINEMA && isLutPreviewEnabled && activeLut != null && activeLut != CinematicLut.NONE) {
+                val badgeLut = activeLut ?: cinemaConfig?.selectedLut
+                val badgeLutPreview = isLutPreviewEnabled || (cinemaConfig?.isLutPreviewEnabled == true)
+                if (cameraMode == CameraMode.CINEMA && badgeLutPreview && badgeLut != null && badgeLut != CinematicLut.NONE) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(8.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .background(Color(0xCC111318))
-                            .border(1.dp, activeLut.accentColor.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                            .border(1.dp, badgeLut.accentColor.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = "LUT: ${activeLut.label} (PREVIEW)",
-                            color = activeLut.accentColor,
+                            text = "LUT: ${badgeLut.label} (PREVIEW)",
+                            color = badgeLut.accentColor,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.5.sp

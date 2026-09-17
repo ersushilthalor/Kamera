@@ -1166,6 +1166,53 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         preferences.setModeHybridStabilizationConfig(_cameraMode.value, config)
     }
 
+    fun setMainCameraStabilizationMode(mode: MainCameraStabilizationMode) {
+        val current = hybridStabilizationConfig.value
+        val updated = when (mode) {
+            MainCameraStabilizationMode.OFF -> current.copy(
+                isHybridEnabled = false,
+                isOisPreferred = false,
+                isEisPreferred = false,
+                isUltraStabilizationEnabled = false,
+                isEisOnly = false
+            )
+            MainCameraStabilizationMode.OIS_ONLY -> current.copy(
+                isHybridEnabled = false,
+                isOisPreferred = true,
+                isEisPreferred = false,
+                isUltraStabilizationEnabled = false,
+                isEisOnly = false
+            )
+            MainCameraStabilizationMode.EIS_ONLY -> current.copy(
+                isHybridEnabled = false,
+                isOisPreferred = false,
+                isEisPreferred = true,
+                isUltraStabilizationEnabled = false,
+                isEisOnly = true
+            )
+            MainCameraStabilizationMode.HYBRID_OIS_EIS -> current.copy(
+                isHybridEnabled = true,
+                isOisPreferred = true,
+                isEisPreferred = true,
+                isUltraStabilizationEnabled = false,
+                isEisOnly = false
+            )
+            MainCameraStabilizationMode.ULTRA -> current.copy(
+                isHybridEnabled = true,
+                isOisPreferred = true,
+                isEisPreferred = true,
+                isUltraStabilizationEnabled = true,
+                isEisOnly = false
+            )
+        }
+        val isStabOn = (mode != MainCameraStabilizationMode.OFF)
+        _isVideoStabilizationEnabled.value = isStabOn
+        preferences.isVideoStabilizationEnabled = isStabOn
+        engine.isVideoStabilizationEnabled = isStabOn
+        setHybridStabilizationConfig(updated)
+        showToast("Stabilization: ${mode.title}")
+    }
+
     fun toggleUltraStabilization() {
         val current = hybridStabilizationConfig.value
         val nextState = !current.isUltraStabilizationEnabled

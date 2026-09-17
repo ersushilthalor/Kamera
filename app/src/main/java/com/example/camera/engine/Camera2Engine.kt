@@ -12,6 +12,7 @@ import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
 import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.StreamConfigurationMap
+import android.hardware.camera2.params.TonemapCurve
 import android.media.CamcorderProfile
 import android.media.Image
 import android.media.ImageReader
@@ -1721,19 +1722,29 @@ class Camera2Engine(private val context: Context) {
                 currentMode == CameraMode.DOLLY_ZOOM || _isRecordingVideo.value
 
         val hybridConfig = _hybridStabilizationConfig.value
+        val isEisOnly = hybridConfig.isEisOnly || (!hybridConfig.isOisPreferred && hybridConfig.isEisPreferred)
+        val isOisOnly = hybridConfig.isOisPreferred && !hybridConfig.isEisPreferred && !hybridConfig.isHybridEnabled
+
         if (isVideoMode) {
             val isUltra = hybridConfig.isUltraStabilizationEnabled
-            val isStabActive = isVideoStabilizationEnabled || isUltra || hybridConfig.isHybridEnabled
+            val isStabActive = isVideoStabilizationEnabled || isUltra || hybridConfig.isHybridEnabled || isEisOnly || isOisOnly
 
             if (isStabActive) {
                 // Optical Image Stabilization (Physical voice-coil motor hardware)
-                // When OIS is explicitly disabled by the user (isOisPreferred == false), strictly disable hardware OIS.
-                if (caps.supportsOis && hybridConfig.isOisPreferred) {
+                // When "EIS Only" is selected, OIS is strictly OFF.
+                if (isEisOnly) {
+                    if (caps.supportsOis) {
+                        builder.set(
+                            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
+                        )
+                    }
+                } else if (caps.supportsOis && hybridConfig.isOisPreferred) {
                     builder.set(
                         CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
                         CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
                     )
-                } else {
+                } else if (caps.supportsOis) {
                     builder.set(
                         CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
                         CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
@@ -1741,40 +1752,46 @@ class Camera2Engine(private val context: Context) {
                 }
 
                 // Electronic Image Stabilization (Digital frame margin compensation)
-                // When Ultra Stabilization is ON, EIS is ALWAYS engaged at maximum performance (CONTROL_VIDEO_STABILIZATION_MODE_ON)
-                // so both the preview and the recorded video frames are actively stabilized by the ISP's electronic image
-                // stabilization engine, even if OIS is turned off!
-                val isHighFps4k = (_selectedVideoResolution.value?.width ?: 0) >= 3840 && videoFps >= 60
-                val allowEis = caps.supportsEis && (isUltra || (hybridConfig.isEisPreferred && (!hybridConfig.isAdaptiveFpsLens || !isHighFps4k)))
-
-                if (isUltra || allowEis) {
-                    // Use CONTROL_VIDEO_STABILIZATION_MODE_ON to ensure recorded video stream is fully stabilized
-                    builder.set(
-                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
-                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
-                    )
-                } else {
+                // When "OIS Only" is selected, EIS is strictly OFF.
+                if (isOisOnly) {
                     builder.set(
                         CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
                         CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
                     )
+                } else {
+                    val isHighFps4k = (_selectedVideoResolution.value?.width ?: 0) >= 3840 && videoFps >= 60
+                    val allowEis = caps.supportsEis && (isUltra || isEisOnly || (hybridConfig.isEisPreferred && (!hybridConfig.isAdaptiveFpsLens || !isHighFps4k)))
+
+                    if (isUltra || allowEis) {
+                        builder.set(
+                            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
+                        )
+                    } else {
+                        builder.set(
+                            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+                        )
+                    }
                 }
             } else {
                 builder.set(
                     CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
                     CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
                 )
-                builder.set(
-                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
-                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
-                )
+                if (caps.supportsOis) {
+                    builder.set(
+                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
+                    )
+                }
             }
         } else {
             // In Still Photo / Night / Portrait: respect OIS toggle state
             if (caps.supportsOis) {
                 builder.set(
                     CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
-                    if (hybridConfig.isOisPreferred) {
+                    if (hybridConfig.isOisPreferred && !isEisOnly) {
                         CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
                     } else {
                         CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
@@ -1791,7 +1808,13 @@ class Camera2Engine(private val context: Context) {
         when (colorProfile) {
             ColorProfile.FLAT_LOG -> {
                 if (caps.supportsTonemapCurve) {
-                    builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_FAST)
+                    val flatCurve = TonemapCurve(
+                        floatArrayOf(0f, 0.16f, 0.25f, 0.35f, 0.5f, 0.54f, 0.75f, 0.72f, 1f, 0.86f),
+                        floatArrayOf(0f, 0.16f, 0.25f, 0.35f, 0.5f, 0.54f, 0.75f, 0.72f, 1f, 0.86f),
+                        floatArrayOf(0f, 0.16f, 0.25f, 0.35f, 0.5f, 0.54f, 0.75f, 0.72f, 1f, 0.86f)
+                    )
+                    builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
+                    builder.set(CaptureRequest.TONEMAP_CURVE, flatCurve)
                 }
                 builder.set(CaptureRequest.CONTROL_EFFECT_MODE, CaptureRequest.CONTROL_EFFECT_MODE_OFF)
             }

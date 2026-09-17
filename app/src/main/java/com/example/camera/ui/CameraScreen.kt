@@ -261,6 +261,10 @@ fun CameraScreen(
             cameraMode = cameraMode,
             previewBufferSize = previewBufferSize,
             sensorOrientation = sensorOrientation,
+            activePhotoFilter = selectedPhotoFilter,
+            activeLut = cinemaConfig.selectedLut,
+            isLutPreviewEnabled = cinemaConfig.isLutPreviewEnabled,
+            cinemaConfig = cinemaConfig,
             onSurfaceTextureAvailable = { texture ->
                 viewModel.engine.setPreviewSurfaceTexture(texture)
             },
@@ -722,6 +726,17 @@ fun CameraScreen(
             hybridStabilizationConfig = hybridStabilizationConfig,
             nightConfig = nightConfig,
             tapFocusConfig = tapFocusConfig,
+            mainCameraStabilizationMode = remember(isVideoStabilizationEnabled, hybridStabilizationConfig) {
+                when {
+                    !isVideoStabilizationEnabled -> com.example.camera.model.MainCameraStabilizationMode.OFF
+                    hybridStabilizationConfig.isUltraStabilizationEnabled -> com.example.camera.model.MainCameraStabilizationMode.ULTRA
+                    hybridStabilizationConfig.isEisOnly -> com.example.camera.model.MainCameraStabilizationMode.EIS_ONLY
+                    hybridStabilizationConfig.isHybridEnabled -> com.example.camera.model.MainCameraStabilizationMode.HYBRID_OIS_EIS
+                    hybridStabilizationConfig.isOisPreferred && !hybridStabilizationConfig.isEisPreferred -> com.example.camera.model.MainCameraStabilizationMode.OIS_ONLY
+                    else -> com.example.camera.model.MainCameraStabilizationMode.HYBRID_OIS_EIS
+                }
+            },
+            onMainCameraStabilizationModeSelected = { viewModel.setMainCameraStabilizationMode(it) },
             // Extended Settings States
             videoCodec = videoCodec,
             jpegQuality = jpegQuality,

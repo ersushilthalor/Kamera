@@ -5,6 +5,7 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.params.ColorSpaceTransform
 import android.hardware.camera2.params.DynamicRangeProfiles
+import android.hardware.camera2.params.RggbChannelVector
 import android.hardware.camera2.params.TonemapCurve
 import android.media.MediaCodecInfo
 import android.media.MediaCodecList
@@ -58,6 +59,7 @@ class CinemaEngine(private val context: Context) {
     private var supportsContrastCurve: Boolean = false
     private var supportsGammaValue: Boolean = false
     private var supportsColorCorrection: Boolean = false
+    private var supportsTransformMatrix: Boolean = false
     private var supportsEdgeOff: Boolean = false
     private var supportsNoiseOff: Boolean = false
     private var availableFpsRanges: Array<android.util.Range<Int>> = emptyArray()
@@ -78,7 +80,9 @@ class CinemaEngine(private val context: Context) {
         tonemapMaxPoints = chars.get(CameraCharacteristics.TONEMAP_MAX_CURVE_POINTS) ?: CURVE_POINTS
 
         val colorModes = chars.get(CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_MODES) ?: intArrayOf()
-        supportsColorCorrection = colorModes.contains(CameraCharacteristics.COLOR_CORRECTION_MODE_FAST) ||
+        supportsTransformMatrix = colorModes.contains(CameraCharacteristics.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
+        supportsColorCorrection = supportsTransformMatrix ||
+                colorModes.contains(CameraCharacteristics.COLOR_CORRECTION_MODE_FAST) ||
                 colorModes.contains(CameraCharacteristics.COLOR_CORRECTION_MODE_HIGH_QUALITY)
 
         val edgeModes = chars.get(CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES) ?: intArrayOf()
@@ -174,13 +178,14 @@ class CinemaEngine(private val context: Context) {
             builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_FAST)
             builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_FAST)
         } else {
-            // 1. Dynamic Hardware Tonemap Curve (Genuine Optical Log Transfer + Shadows, Highlights, Contrast adjustments)
+            // 1. Dynamic Hardware Tonemap Curve (Genuine Optical Log Transfer + Shadows, Highlights, Contrast adjustments + LUT Tone)
             if (supportsContrastCurve) {
                 val tonemapCurve = generateLogTonemapCurve(
                     config.colorProfile,
                     config.shadows,
                     config.highlights,
-                    config.contrast
+                    config.contrast,
+                    config.selectedLut
                 )
                 builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
                 builder.set(CaptureRequest.TONEMAP_CURVE, tonemapCurve)
@@ -192,18 +197,30 @@ class CinemaEngine(private val context: Context) {
                     CinemaColorProfile.REC_2020 -> 2.1f
                     CinemaColorProfile.REC_709 -> 2.2f
                 }
-                val adjustedGamma = (baseGamma + config.contrast * 0.3f).coerceIn(1.0f, 3.0f)
+                val lutContrastOffset = if (config.selectedLut != CinematicLut.NONE) (config.selectedLut.contrast - 1.0f) * 0.3f else 0.0f
+                val adjustedGamma = (baseGamma + (config.contrast * 0.3f) + lutContrastOffset).coerceIn(1.0f, 3.0f)
                 builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_GAMMA_VALUE)
                 builder.set(CaptureRequest.TONEMAP_GAMMA, adjustedGamma)
             } else {
                 builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)
             }
 
-            // 2. Hardware Color Space Matrix (Gamut Transfer + Saturation Scaling)
+            // 2. Hardware Color Space Matrix (Gamut Transfer + Saturation Scaling + Cinematic LUT)
             if (supportsColorCorrection) {
-                val transform = generateColorSpaceTransform(config.colorSpace, config.saturation)
-                builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_FAST)
-                builder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform)
+                val transform = generateColorSpaceTransform(
+                    config.colorSpace,
+                    config.colorProfile,
+                    config.saturation,
+                    config.selectedLut
+                )
+                if (supportsTransformMatrix) {
+                    builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
+                    builder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform)
+                    builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, generateColorGains(config.selectedLut))
+                } else {
+                    builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_FAST)
+                    builder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform)
+                }
             }
         }
 
@@ -241,7 +258,7 @@ class CinemaEngine(private val context: Context) {
         // 4. Real Camera2 EV (Exposure Compensation) with calibrated Log offset to prevent underexposure
         val logCompensationOffset = if (config.logBitDepth != LogBitDepth.OFF) {
             when (config.colorProfile) {
-                CinemaColorProfile.FLAT_LOG, CinemaColorProfile.S_LOG3, CinemaColorProfile.C_LOG3, CinemaColorProfile.V_LOG -> 3 // +1.0 EV
+                CinemaColorProfile.FLAT_LOG, CinemaColorProfile.S_LOG3, CinemaColorProfile.C_LOG3, CinemaColorProfile.V_LOG, CinemaColorProfile.REC_2020 -> 3 // +1.0 EV
                 CinemaColorProfile.HLG -> 2 // +0.67 EV
                 else -> 0
             }
@@ -276,22 +293,26 @@ class CinemaEngine(private val context: Context) {
     }
 
     /**
-     * Compute mathematically accurate transfer curves for cinematic Log profiles with Shadows, Highlights, and Contrast.
+     * Compute mathematically accurate transfer curves for cinematic Log profiles with Shadows, Highlights, Contrast, and LUT.
      */
     private fun generateLogTonemapCurve(
         profile: CinemaColorProfile,
         shadows: Float,
         highlights: Float,
-        contrast: Float
+        contrast: Float,
+        lut: CinematicLut = CinematicLut.NONE
     ): TonemapCurve {
         val numPoints = CURVE_POINTS
+        val lutContrast = if (lut != CinematicLut.NONE) (lut.contrast - 1.0f) else 0.0f
+        val totalContrast = (contrast + lutContrast).coerceIn(-1.0f, 1.5f)
+
         for (i in 0 until numPoints) {
             val x = i.toFloat() / (numPoints - 1).toFloat()
             var y = evaluateLogTransferFunction(profile, x)
 
             // 1. Contrast (S-Curve adjustment centered around middle-grey ~0.18):
-            if (contrast != 0.0f) {
-                val factor = 1.0f + (contrast * 0.4f)
+            if (totalContrast != 0.0f) {
+                val factor = 1.0f + (totalContrast * 0.45f)
                 y = 0.18f + (y - 0.18f) * factor
             }
 
@@ -326,19 +347,28 @@ class CinemaEngine(private val context: Context) {
     }
 
     /**
+     * Generate color gains for white balance & LUT color temperature tint.
+     */
+    private fun generateColorGains(lut: CinematicLut): RggbChannelVector {
+        val offset = lut.warmCoolOffset
+        val rGain = (1.0f + offset * 0.32f).coerceIn(0.5f, 2.0f)
+        val bGain = (1.0f - offset * 0.32f).coerceIn(0.5f, 2.0f)
+        return RggbChannelVector(rGain, 1.0f, 1.0f, bGain)
+    }
+
+    /**
      * Evaluate exact mathematical transfer function for each profile.
      */
     private fun evaluateLogTransferFunction(profile: CinemaColorProfile, x: Float): Float {
         val inVal = x.coerceIn(0f, 1f)
         return when (profile) {
             CinemaColorProfile.FLAT_LOG -> {
-                // Cineon-style Flat logarithmic curve: lifts shadows to 0.12 and rolls off specular highlights
-                val logVal = ln(1f + 9.0f * inVal) / ln(10.0f)
-                (0.12f + 0.84f * logVal).coerceIn(0f, 1f)
+                // True Flat Log curve: lifts black pedestal to 0.16f and provides wide logarithmic latitude
+                val logVal = ln(1f + 14.0f * inVal) / ln(15.0f)
+                (0.16f + 0.78f * logVal).coerceIn(0f, 1f)
             }
             CinemaColorProfile.S_LOG3 -> {
                 // Official Sony S-Log3 transfer function:
-                // Reflectance input range [0, 1]
                 if (inVal >= 0.01125f) {
                     val logPart = log10((inVal + 0.01f) / (0.18f + 0.01f))
                     val y = (420.0f + logPart * 261.5f) / 1023.0f
@@ -377,14 +407,16 @@ class CinemaEngine(private val context: Context) {
                 }
             }
             CinemaColorProfile.REC_2020 -> {
-                // ITU-R BT.2020 transfer function:
+                // ITU-R BT.2020 transfer function with calibrated midtone lifting:
                 val alpha = 1.09929682680944f
                 val beta = 0.018053968510807f
-                if (inVal < beta) {
-                    (4.5f * inVal).coerceIn(0f, 1f)
+                val base = if (inVal < beta) {
+                    4.5f * inVal
                 } else {
-                    (alpha * inVal.pow(0.45f) - (alpha - 1.0f)).coerceIn(0f, 1f)
+                    alpha * inVal.pow(0.45f) - (alpha - 1.0f)
                 }
+                // Lift shadows & midtones so Rec.2020 Log matches actual scene exposure without crushing
+                (0.12f + 0.88f * base).coerceIn(0f, 1f)
             }
             CinemaColorProfile.HLG -> {
                 // ITU-R BT.2100 Hybrid Log-Gamma transfer function:
@@ -401,9 +433,14 @@ class CinemaEngine(private val context: Context) {
     }
 
     /**
-     * Compute 3x3 ColorSpaceTransform matrix for Color Gamut conversion and Saturation scaling.
+     * Compute 3x3 ColorSpaceTransform matrix for Color Gamut conversion, Saturation scaling, and Cinematic LUT.
      */
-    private fun generateColorSpaceTransform(colorSpace: CinemaColorSpace, saturation: Float = 1.0f): ColorSpaceTransform {
+    private fun generateColorSpaceTransform(
+        colorSpace: CinemaColorSpace,
+        profile: CinemaColorProfile,
+        saturation: Float = 1.0f,
+        lut: CinematicLut = CinematicLut.NONE
+    ): ColorSpaceTransform {
         val base = when (colorSpace) {
             CinemaColorSpace.REC_709 -> floatArrayOf(
                 1.0f, 0.0f, 0.0f,
@@ -422,7 +459,15 @@ class CinemaEngine(private val context: Context) {
             )
         }
 
-        val sat = saturation.coerceIn(0.0f, 2.0f)
+        // Apply profile-specific saturation compensation & user saturation
+        val profileSatMultiplier = when (profile) {
+            CinemaColorProfile.HLG -> 1.28f // Fix faded HLG colors
+            CinemaColorProfile.FLAT_LOG -> 0.88f // Flat desaturated base for pure Log
+            else -> 1.0f
+        }
+        val lutSat = if (lut != CinematicLut.NONE) lut.saturation else 1.0f
+        val effectiveSat = (saturation * profileSatMultiplier * lutSat).coerceIn(0.0f, 2.5f)
+
         val outRationals = IntArray(18)
         for (row in 0..2) {
             val lum = when (row) {
@@ -432,8 +477,24 @@ class CinemaEngine(private val context: Context) {
             }
             for (col in 0..2) {
                 val baseVal = base[row * 3 + col]
-                val satVal = (1.0f - sat) * lum + sat * baseVal
-                val num = (satVal * 256f).roundToInt().coerceIn(-1024, 1024)
+                var cellVal = (1.0f - effectiveSat) * lum + effectiveSat * baseVal
+
+                // Blend in LUT's matrix orientation if available
+                if (lut != CinematicLut.NONE) {
+                    val lutMatrix = when (lut) {
+                        CinematicLut.FILMIC_GOLD -> floatArrayOf(1.10f, 0.02f, -0.05f, 0.02f, 1.04f, -0.02f, -0.06f, 0.01f, 0.92f)
+                        CinematicLut.TEAL_ORANGE -> floatArrayOf(1.15f, -0.05f, -0.06f, -0.03f, 1.06f, 0.04f, -0.08f, 0.06f, 1.18f)
+                        CinematicLut.MUTED_CINE -> floatArrayOf(0.95f, 0.03f, 0.03f, 0.03f, 0.96f, 0.03f, 0.03f, 0.03f, 0.97f)
+                        CinematicLut.HIGH_CONTRAST -> floatArrayOf(1.25f, -0.08f, -0.08f, -0.08f, 1.25f, -0.08f, -0.08f, -0.08f, 1.25f)
+                        CinematicLut.MONO_CINE -> floatArrayOf(0.299f, 0.587f, 0.114f, 0.299f, 0.587f, 0.114f, 0.299f, 0.587f, 0.114f)
+                        else -> null
+                    }
+                    if (lutMatrix != null) {
+                        cellVal = (cellVal * 0.6f) + (lutMatrix[row * 3 + col] * 0.4f)
+                    }
+                }
+
+                val num = (cellVal * 256f).roundToInt().coerceIn(-1024, 1024)
                 val outIdx = (row * 3 + col) * 2
                 outRationals[outIdx] = num
                 outRationals[outIdx + 1] = 256
