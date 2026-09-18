@@ -161,7 +161,7 @@ data class ModeLayoutConfig(
         TopControlItem.SETTINGS
     ),
     val hiddenTopControls: Set<TopControlItem> = emptySet(),
-    val topControlsIconSizeDp: Int = 24,
+    val topControlsIconSizeDp: Int = 20,
     val topControlsSpacingDp: Int = 16,
     val topBarAlignment: TopBarAlignment = TopBarAlignment.SPACE_BETWEEN,
     val topPaddingDp: Int = 12,
@@ -179,7 +179,7 @@ data class ModeLayoutConfig(
     // Extended icon styling
     val iconStyleOption: IconStyleOption = IconStyleOption.ROUNDED_MATERIAL,
     val iconColorHex: String = "#FFFFFF",
-    val iconShapeOption: IconShapeOption = IconShapeOption.CIRCLE_GLASS,
+    val iconShapeOption: IconShapeOption = IconShapeOption.TRANSPARENT_NONE,
     val iconContainerOpacity: Float = 0.35f,
     val iconStrokeWidthDp: Float = 1.8f,
     // Uploaded photo UI matching
@@ -354,8 +354,8 @@ data class ModeLayoutConfig(
                 } catch (e: Exception) { IconStyleOption.ROUNDED_MATERIAL },
                 iconColorHex = json.optString("iconColorHex", "#FFFFFF"),
                 iconShapeOption = try {
-                    IconShapeOption.valueOf(json.optString("iconShapeOption", IconShapeOption.CIRCLE_GLASS.name))
-                } catch (e: Exception) { IconShapeOption.CIRCLE_GLASS },
+                    IconShapeOption.valueOf(json.optString("iconShapeOption", IconShapeOption.TRANSPARENT_NONE.name))
+                } catch (e: Exception) { IconShapeOption.TRANSPARENT_NONE },
                 iconContainerOpacity = json.optDouble("iconContainerOpacity", 0.35).toFloat(),
                 iconStrokeWidthDp = json.optDouble("iconStrokeWidthDp", 1.8).toFloat(),
                 customUiPhotoUri = if (json.has("customUiPhotoUri")) json.optString("customUiPhotoUri") else null,
@@ -476,7 +476,7 @@ object CameraUiTemplates {
                 shutterHorizontalOffsetDp = 0,
                 flipButtonSizeDp = 54,
                 galleryThumbSizeDp = 54,
-                topControlsIconSizeDp = 22,
+                topControlsIconSizeDp = 18,
                 topControlsSpacingDp = 18,
                 topBarAlignment = TopBarAlignment.SPACE_BETWEEN,
                 accentColorHex = "#8AB4F8",
@@ -486,7 +486,8 @@ object CameraUiTemplates {
                 bottomPaddingDp = 10,
                 showZoomCapsule = true,
                 zoomCapsuleScale = 1.0f,
-                zoomCapsuleVerticalOffsetDp = 0
+                zoomCapsuleVerticalOffsetDp = 0,
+                iconShapeOption = IconShapeOption.TRANSPARENT_NONE
             )
             UiTemplateType.MINIMAL_PRO -> ModeLayoutConfig(
                 modeSelectorPosition = ModeSelectorPosition.ABOVE_SHUTTER,
@@ -496,7 +497,7 @@ object CameraUiTemplates {
                 shutterHorizontalOffsetDp = 0,
                 flipButtonSizeDp = 48,
                 galleryThumbSizeDp = 48,
-                topControlsIconSizeDp = 20,
+                topControlsIconSizeDp = 18,
                 topControlsSpacingDp = 16,
                 topBarAlignment = TopBarAlignment.SPACE_BETWEEN,
                 accentColorHex = "#E53935",
@@ -506,7 +507,8 @@ object CameraUiTemplates {
                 bottomPaddingDp = 12,
                 showZoomCapsule = true,
                 zoomCapsuleScale = 0.92f,
-                zoomCapsuleVerticalOffsetDp = 4
+                zoomCapsuleVerticalOffsetDp = 4,
+                iconShapeOption = IconShapeOption.TRANSPARENT_NONE
             )
             UiTemplateType.FUTURISTIC_GLASS -> ModeLayoutConfig(
                 modeSelectorPosition = ModeSelectorPosition.ABOVE_SHUTTER,
@@ -516,7 +518,7 @@ object CameraUiTemplates {
                 shutterHorizontalOffsetDp = 0,
                 flipButtonSizeDp = 56,
                 galleryThumbSizeDp = 56,
-                topControlsIconSizeDp = 24,
+                topControlsIconSizeDp = 20,
                 topControlsSpacingDp = 20,
                 topBarAlignment = TopBarAlignment.SPACE_BETWEEN,
                 accentColorHex = "#00E5FF",
@@ -526,7 +528,8 @@ object CameraUiTemplates {
                 bottomPaddingDp = 14,
                 showZoomCapsule = true,
                 zoomCapsuleScale = 1.05f,
-                zoomCapsuleVerticalOffsetDp = -2
+                zoomCapsuleVerticalOffsetDp = -2,
+                iconShapeOption = IconShapeOption.TRANSPARENT_NONE
             )
             UiTemplateType.DSLR_PRO -> ModeLayoutConfig(
                 modeSelectorPosition = ModeSelectorPosition.ABOVE_SHUTTER,
@@ -536,7 +539,7 @@ object CameraUiTemplates {
                 shutterHorizontalOffsetDp = 0,
                 flipButtonSizeDp = 54,
                 galleryThumbSizeDp = 54,
-                topControlsIconSizeDp = 22,
+                topControlsIconSizeDp = 18,
                 topControlsSpacingDp = 14,
                 topBarAlignment = TopBarAlignment.SPACE_BETWEEN,
                 accentColorHex = "#FFB300",
@@ -546,7 +549,8 @@ object CameraUiTemplates {
                 bottomPaddingDp = 16,
                 showZoomCapsule = true,
                 zoomCapsuleScale = 0.95f,
-                zoomCapsuleVerticalOffsetDp = 0
+                zoomCapsuleVerticalOffsetDp = 0,
+                iconShapeOption = IconShapeOption.TRANSPARENT_NONE
             )
             UiTemplateType.IMMERSIVE_EDGE -> ModeLayoutConfig(
                 modeSelectorPosition = ModeSelectorPosition.BELOW_SHUTTER,
@@ -556,7 +560,7 @@ object CameraUiTemplates {
                 shutterHorizontalOffsetDp = 0,
                 flipButtonSizeDp = 48,
                 galleryThumbSizeDp = 48,
-                topControlsIconSizeDp = 20,
+                topControlsIconSizeDp = 18,
                 topControlsSpacingDp = 16,
                 topBarAlignment = TopBarAlignment.SPACE_BETWEEN,
                 accentColorHex = "#69F0AE",
@@ -566,7 +570,8 @@ object CameraUiTemplates {
                 bottomPaddingDp = 8,
                 showZoomCapsule = false,
                 zoomCapsuleScale = 1.0f,
-                zoomCapsuleVerticalOffsetDp = 0
+                zoomCapsuleVerticalOffsetDp = 0,
+                iconShapeOption = IconShapeOption.TRANSPARENT_NONE
             )
             UiTemplateType.IPHONE -> ModeLayoutConfig(
                 modeSelectorPosition = ModeSelectorPosition.ABOVE_SHUTTER,
@@ -576,14 +581,15 @@ object CameraUiTemplates {
                 shutterHorizontalOffsetDp = 0,
                 flipButtonSizeDp = 52,
                 galleryThumbSizeDp = 52,
-                topControlsIconSizeDp = 22,
+                topControlsIconSizeDp = 18,
                 topControlsSpacingDp = 14,
                 topBarAlignment = TopBarAlignment.SPACE_BETWEEN,
                 accentColorHex = "#FFD54F",
                 modeTextSizeSp = 13.0f,
                 modeFontFamily = FontFamilyOption.DEFAULT,
                 topPaddingDp = 10,
-                bottomPaddingDp = 12
+                bottomPaddingDp = 12,
+                iconShapeOption = IconShapeOption.TRANSPARENT_NONE
             )
             UiTemplateType.SAMSUNG -> ModeLayoutConfig(
                 modeSelectorPosition = ModeSelectorPosition.ABOVE_SHUTTER,
@@ -593,14 +599,15 @@ object CameraUiTemplates {
                 shutterHorizontalOffsetDp = 0,
                 flipButtonSizeDp = 56,
                 galleryThumbSizeDp = 56,
-                topControlsIconSizeDp = 24,
+                topControlsIconSizeDp = 20,
                 topControlsSpacingDp = 18,
                 topBarAlignment = TopBarAlignment.SPACE_BETWEEN,
                 accentColorHex = "#FFFFFF",
                 modeTextSizeSp = 13.5f,
                 modeFontFamily = FontFamilyOption.ROUNDED,
                 topPaddingDp = 12,
-                bottomPaddingDp = 16
+                bottomPaddingDp = 16,
+                iconShapeOption = IconShapeOption.TRANSPARENT_NONE
             )
             UiTemplateType.VIVO -> ModeLayoutConfig(
                 modeSelectorPosition = ModeSelectorPosition.BELOW_SHUTTER,
@@ -610,14 +617,15 @@ object CameraUiTemplates {
                 shutterHorizontalOffsetDp = 0,
                 flipButtonSizeDp = 54,
                 galleryThumbSizeDp = 54,
-                topControlsIconSizeDp = 24,
+                topControlsIconSizeDp = 20,
                 topControlsSpacingDp = 16,
                 topBarAlignment = TopBarAlignment.SPACE_BETWEEN,
                 accentColorHex = "#FF7043",
                 modeTextSizeSp = 14.0f,
                 modeFontFamily = FontFamilyOption.DEFAULT,
                 topPaddingDp = 12,
-                bottomPaddingDp = 14
+                bottomPaddingDp = 14,
+                iconShapeOption = IconShapeOption.TRANSPARENT_NONE
             )
             UiTemplateType.CUSTOM -> ModeLayoutConfig(
                 modeSelectorPosition = ModeSelectorPosition.ABOVE_SHUTTER,
@@ -627,14 +635,15 @@ object CameraUiTemplates {
                 shutterHorizontalOffsetDp = 0,
                 flipButtonSizeDp = 54,
                 galleryThumbSizeDp = 54,
-                topControlsIconSizeDp = 24,
+                topControlsIconSizeDp = 20,
                 topControlsSpacingDp = 16,
                 topBarAlignment = TopBarAlignment.SPACE_BETWEEN,
                 accentColorHex = "#64B5F6",
                 modeTextSizeSp = 13.5f,
                 modeFontFamily = FontFamilyOption.DEFAULT,
                 topPaddingDp = 12,
-                bottomPaddingDp = 14
+                bottomPaddingDp = 14,
+                iconShapeOption = IconShapeOption.TRANSPARENT_NONE
             )
         }
     }

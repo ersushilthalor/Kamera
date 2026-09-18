@@ -1644,8 +1644,8 @@ private fun IconStylesTabContent(
             Slider(
                 value = config.topControlsIconSizeDp.toFloat(),
                 onValueChange = { onConfigChange(config.copy(topControlsIconSizeDp = it.roundToInt())) },
-                valueRange = 18f..34f,
-                steps = 7,
+                valueRange = 14f..32f,
+                steps = 8,
                 modifier = Modifier.fillMaxWidth()
             )
         }

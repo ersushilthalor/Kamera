@@ -1363,8 +1363,8 @@ fun TopBarControlsEditor(
             Slider(
                 value = config.topControlsIconSizeDp.toFloat(),
                 onValueChange = { onUpdate(config.copy(topControlsIconSizeDp = it.toInt())) },
-                valueRange = 18f..32f,
-                steps = 6
+                valueRange = 14f..32f,
+                steps = 8
             )
         }
 

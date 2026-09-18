@@ -30,7 +30,7 @@ fun getTopControlShape(layoutConfig: ModeLayoutConfig): androidx.compose.ui.grap
         IconShapeOption.ROUNDED_SQUARE -> RoundedCornerShape(10.dp)
         IconShapeOption.HEXAGON -> RoundedCornerShape(6.dp)
         IconShapeOption.PILL -> RoundedCornerShape(18.dp)
-        IconShapeOption.TRANSPARENT_NONE -> CircleShape
+        IconShapeOption.TRANSPARENT_NONE -> RoundedCornerShape(0.dp)
     }
 }
 
@@ -39,6 +39,11 @@ fun Modifier.topControlStyle(
     activeColor: Color? = null,
     isPill: Boolean = false
 ): Modifier {
+    // If transparent / floating icons requested, don't draw any background pod or border
+    if (layoutConfig.iconShapeOption == IconShapeOption.TRANSPARENT_NONE) {
+        return this
+    }
+
     val shape = if (isPill) RoundedCornerShape(17.dp) else getTopControlShape(layoutConfig)
     val style = layoutConfig.iconStyleOption
 
@@ -142,7 +147,7 @@ fun TopControlBar(
 ) {
     val accentColor = layoutConfig.getComposeAccentColor()
     val iconSize = layoutConfig.topControlsIconSizeDp.dp
-    val buttonSize = (layoutConfig.topControlsIconSizeDp + 18).dp.coerceAtLeast(38.dp)
+    val buttonSize = (layoutConfig.topControlsIconSizeDp + 14).dp.coerceAtLeast(32.dp)
 
     Box(
         modifier = modifier
