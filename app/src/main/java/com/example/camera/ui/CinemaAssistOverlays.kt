@@ -168,7 +168,7 @@ fun CinemaAssistOverlays(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "${if (cinemaConfig.isRawSensorLogPipeline) "RAW LOG" else "LOG"} · ${cinemaConfig.colorProfile.label.uppercase()} · ${cinemaConfig.logBitDepth.label}",
+                    text = "${cinemaConfig.colorProfile.label.uppercase()} · ${cinemaConfig.logBitDepth.label}",
                     color = Color.White,
                     fontSize = 9.5.sp,
                     fontWeight = FontWeight.Bold,

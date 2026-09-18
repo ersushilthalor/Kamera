@@ -654,6 +654,7 @@ fun SettingsDrawer(
                             ) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     listOf(
+                                        CinemaColorProfile.NATIVE,
                                         CinemaColorProfile.REC_709,
                                         CinemaColorProfile.FLAT_LOG,
                                         CinemaColorProfile.HLG,
@@ -661,6 +662,7 @@ fun SettingsDrawer(
                                     ).forEach { profile ->
                                         SamsungSmallChip(
                                             label = when (profile) {
+                                                CinemaColorProfile.NATIVE -> "Native"
                                                 CinemaColorProfile.REC_709 -> "Rec.709"
                                                 CinemaColorProfile.FLAT_LOG -> "Flat Log"
                                                 CinemaColorProfile.HLG -> "HLG"

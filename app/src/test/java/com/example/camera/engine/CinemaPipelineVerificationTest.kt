@@ -124,9 +124,54 @@ class CinemaPipelineVerificationTest {
         assertTrue(tealOrange.contrast > 1.0f)
         assertTrue(tealOrange.saturation > 1.0f)
 
-        val bleachBypass = CinematicLut.BLEACH_BYPASS
-        assertTrue(bleachBypass.contrast > 1.1f)
-        assertTrue(bleachBypass.saturation < 1.0f) // Desaturated film look
+        val warmCinema = CinematicLut.WARM_CINEMA
+        assertTrue("Warm Cinema has filmic contrast", warmCinema.contrast > 1.0f)
+        assertTrue("Warm Cinema has amber warmth offset", warmCinema.warmCoolOffset > 0f)
+
+        val mutedFilm = CinematicLut.MUTED_FILM
+        assertTrue("Muted Film has lifted shadow toe", mutedFilm.shadowToe > 0f)
+        assertTrue("Muted Film has subdued saturation", mutedFilm.saturation < 1.0f)
+    }
+
+    @Test
+    fun testWashedOutSliderReducesFlatPedestalAndRestoresContrast() {
+        val flatConfig = CinemaConfig(
+            colorProfile = CinemaColorProfile.FLAT_LOG,
+            washedOut = 0.0f
+        )
+        cinemaEngine.updateConfig(flatConfig)
+        val flatCurve = cinemaEngine.getTonemapCurve()
+        val flatBlack = flatCurve.getPoint(TonemapCurve.CHANNEL_RED, 0).y
+
+        // Washed out slider at 1.0 should significantly lower black level / pedestal to eliminate hazy look
+        val punchyConfig = CinemaConfig(
+            colorProfile = CinemaColorProfile.FLAT_LOG,
+            washedOut = 1.0f
+        )
+        cinemaEngine.updateConfig(punchyConfig)
+        val punchyCurve = cinemaEngine.getTonemapCurve()
+        val punchyBlack = punchyCurve.getPoint(TonemapCurve.CHANNEL_RED, 0).y
+
+        assertTrue("Washed-out slider must reduce shadow pedestal ($punchyBlack < $flatBlack)", punchyBlack < flatBlack)
+    }
+
+    @Test
+    fun testNativeColorProfileUsesNaturalOetf() {
+        val nativeConfig = CinemaConfig(
+            colorProfile = CinemaColorProfile.NATIVE,
+            washedOut = 0f
+        )
+        cinemaEngine.updateConfig(nativeConfig)
+        val curve = cinemaEngine.getTonemapCurve()
+        val count = curve.getPointCount(TonemapCurve.CHANNEL_RED)
+
+        // Native black point must be 0.0 without any lifted pedestal
+        val blackPoint = curve.getPoint(TonemapCurve.CHANNEL_RED, 0)
+        assertEquals(0.0f, blackPoint.y, 0.005f)
+
+        // Native middle-grey should be standard Rec.709 OETF (~0.73)
+        val midPoint = curve.getPoint(TonemapCurve.CHANNEL_RED, count / 2)
+        assertTrue("Native mid-tone should match standard photographic gamma", midPoint.y in 0.65f..0.80f)
     }
 
     @Test

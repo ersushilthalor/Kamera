@@ -24,6 +24,7 @@ enum class CinemaColorProfile(
     val description: String,
     val gammaName: String
 ) {
+    NATIVE("Native", "Natural, standard video colors ready to share with balanced contrast and skin tones", "Native"),
     FLAT_LOG("Flat (LOG)", "Logarithmic dynamic range curve for color grading", "Flat Log"),
     S_LOG3("S-Log3", "Sony S-Log3 cine curve preserving 14+ stops of dynamic range", "S-Log3"),
     C_LOG3("C-Log3", "Canon Log 3 filmic contrast curve with smooth highlight rolloff", "C-Log3"),
@@ -78,6 +79,7 @@ data class CinemaConfig(
     val highlights: Float = 0.0f, // -1.0f (compressed/protected) to +1.0f (boosted highlight shoulder)
     val contrast: Float = 0.0f, // -1.0f (flat latitude) to +1.0f (punchy cinematic S-curve)
     val exposure: Float = 0.0f, // -1.0f to +1.0f real-time live exposure slider
+    val washedOut: Float = 0.0f, // 0.0f (pure LOG/HLG) to 1.0f (progressive reduction of washed-out appearance with contrast/saturation recovery)
     val saturation: Float = 1.0f, // 0.0f (monochrome/desaturated) to 2.0f (vibrant) via 3x3 color gamut matrix
     val sharpness: CinemaSharpness = CinemaSharpness.NATURAL,
     val noiseReduction: CinemaNoiseReduction = CinemaNoiseReduction.MEDIUM,
@@ -86,7 +88,7 @@ data class CinemaConfig(
     val manualIso: Int? = null, // null for Auto, or 50, 100, 200, 400, 800, 1600, 3200
     val manualShutterSpeedNs: Long? = null // null for Auto, or 1/24s, 1/48s (180°), 1/50s, 1/96s, 1/120s
 ) {
-    val isLogMode: Boolean get() = colorProfile != CinemaColorProfile.REC_709 || logBitDepth != LogBitDepth.OFF
+    val isLogMode: Boolean get() = (colorProfile != CinemaColorProfile.REC_709 && colorProfile != CinemaColorProfile.NATIVE) || logBitDepth != LogBitDepth.OFF
     val activeLut: CinematicLut get() = selectedLut
     val shouldBakeLut: Boolean get() = isBakeLutToOutput && selectedLut != CinematicLut.NONE
 }

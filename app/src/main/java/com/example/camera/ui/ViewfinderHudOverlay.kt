@@ -298,14 +298,6 @@ fun MinimalProTelemetryStrip(
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace
             )
-            Text("·", color = Color.Gray, fontSize = 11.sp)
-            Text(
-                text = "RAW",
-                color = Color.White.copy(alpha = 0.8f),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.ExtraBold,
-                fontFamily = FontFamily.Monospace
-            )
         }
     }
 }

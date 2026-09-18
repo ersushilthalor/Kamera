@@ -225,10 +225,29 @@ fun Viewfinder(
                                     colorMatrix.postConcat(rec2020Matrix)
                                     hasFilter = true
                                 }
+                                CinemaColorProfile.NATIVE -> {
+                                    // Native: standard unadjusted natural camera profile
+                                }
                                 else -> {}
                             }
 
-                            // 2. Real-time Exposure control (+/-) on viewfinder
+                            // 2. Washed Out Reduction (recovers deep blacks & midtone contrast from flat profiles)
+                            if (cinemaConfig.washedOut > 0.0f) {
+                                val w = cinemaConfig.washedOut
+                                val pedestalReduction = -28f * w
+                                val contrastBoost = 1.0f + (w * 0.25f)
+                                val t = (1.0f - contrastBoost) * 128f + pedestalReduction
+                                val washedOutMatrix = android.graphics.ColorMatrix(floatArrayOf(
+                                    contrastBoost, 0f, 0f, 0f, t,
+                                    0f, contrastBoost, 0f, 0f, t,
+                                    0f, 0f, contrastBoost, 0f, t,
+                                    0f, 0f, 0f, 1f, 0f
+                                ))
+                                colorMatrix.postConcat(washedOutMatrix)
+                                hasFilter = true
+                            }
+
+                            // 3. Real-time Exposure control (+/-) on viewfinder
                             if (cinemaConfig.exposure != 0.0f) {
                                 val expMultiplier = 2.0f.pow(cinemaConfig.exposure * 0.75f)
                                 val expMatrix = android.graphics.ColorMatrix(floatArrayOf(

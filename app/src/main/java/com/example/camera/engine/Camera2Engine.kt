@@ -191,6 +191,8 @@ class Camera2Engine(private val context: Context) {
     private val _isAfLockedFlow = MutableStateFlow(false)
     val isAfLockedFlow: StateFlow<Boolean> = _isAfLockedFlow.asStateFlow()
 
+    private var activeMeteringRectangle: MeteringRectangle? = null
+
     val dollyZoomEngine = DollyZoomEngine()
     val nightFusionProcessor = NightFusionProcessor()
     val gyroStabilizationEngine = GyroStabilizationEngine(context)
@@ -1679,6 +1681,12 @@ class Camera2Engine(private val context: Context) {
             builder.set(CaptureRequest.CONTROL_AE_LOCK, isAeLocked)
         }
 
+        // Active Tap-to-Expose & Tap-to-Focus Metering Region (preserved across setting adjustments)
+        activeMeteringRectangle?.let { rect ->
+            builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(rect))
+            builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(rect))
+        }
+
         // White Balance
         builder.set(CaptureRequest.CONTROL_AWB_MODE, whiteBalanceMode.camera2Mode)
 
@@ -2144,6 +2152,7 @@ class Camera2Engine(private val context: Context) {
             val bottom = (targetSensorY + boxH / 2).toInt().coerceIn(top + 10, sensorRect.bottom)
 
             val focusRect = MeteringRectangle(Rect(left, top, right, bottom), MeteringRectangle.METERING_WEIGHT_MAX)
+            activeMeteringRectangle = focusRect
 
             builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(focusRect))
             builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(focusRect))
@@ -2159,13 +2168,20 @@ class Camera2Engine(private val context: Context) {
                 builder.set(CaptureRequest.CONTROL_AE_LOCK, true)
             }
 
-            session.capture(builder.build(), object : CameraCaptureSession.CaptureCallback() {
+            val precaptureRequest = builder.build()
+
+            // Crucial: reset triggers on the builder so subsequent frames do not re-trigger AE/AF precapture
+            builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
+            builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_IDLE)
+
+            session.capture(precaptureRequest, object : CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureCompleted(
                     session: CameraCaptureSession,
                     request: CaptureRequest,
                     result: TotalCaptureResult
                 ) {
                     builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
+                    builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_IDLE)
                     if (isLock) {
                         builder.set(CaptureRequest.CONTROL_AE_LOCK, true)
                         builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
@@ -2178,7 +2194,11 @@ class Camera2Engine(private val context: Context) {
                         }
                         builder.set(CaptureRequest.CONTROL_AF_MODE, continuousMode)
                     }
-                    session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
+                    try {
+                        session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to restore repeating request after tap-to-expose", e)
+                    }
                 }
             }, backgroundHandler)
         } catch (e: Exception) {
@@ -2197,6 +2217,7 @@ class Camera2Engine(private val context: Context) {
 
         builder.set(CaptureRequest.CONTROL_AE_LOCK, nextLock)
         if (!nextLock) {
+            activeMeteringRectangle = null
             builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
             builder.set(CaptureRequest.CONTROL_AF_REGIONS, null)
             builder.set(CaptureRequest.CONTROL_AE_REGIONS, null)

@@ -1329,6 +1329,49 @@ fun CinemaSettingsWindow(
                         .height(32.dp)
                         .testTag("cinema_slider_saturation")
                 )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Washed Out / Contrast Recovery Slider
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Washed Out Reduction",
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Restores natural black depth & contrast",
+                            color = Color.White.copy(alpha = 0.5f),
+                            fontSize = 9.5.sp
+                        )
+                    }
+                    Text(
+                        text = "${(config.washedOut * 100f).toInt()}%",
+                        color = Color(0xFFFFD54F),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Slider(
+                    value = config.washedOut,
+                    onValueChange = { onConfigChange(config.copy(washedOut = it)) },
+                    valueRange = 0.0f..1.0f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color(0xFFFFD54F),
+                        activeTrackColor = Color(0xFFFFD54F),
+                        inactiveTrackColor = Color(0xFF33333C)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(32.dp)
+                        .testTag("cinema_slider_washed_out")
+                )
             }
         }
     }
