@@ -144,6 +144,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // Cinema Mode State & Panel visibility
     val cinemaConfig: StateFlow<CinemaConfig> = engine.cinemaConfig
     val cinemaCapabilities: StateFlow<CinemaHardwareCapabilities> = engine.cinemaCapabilities
+    val rec2020AutoToneParams: StateFlow<com.example.camera.engine.Rec2020AutoToneParams> = engine.rec2020AutoToneParams
     val capabilities: StateFlow<HardwareCapabilities> = engine.capabilities
     private val _isCinemaSettingsOpen = MutableStateFlow(false)
     val isCinemaSettingsOpen: StateFlow<Boolean> = _isCinemaSettingsOpen.asStateFlow()

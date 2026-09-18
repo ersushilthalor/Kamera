@@ -243,6 +243,7 @@ class Camera2Engine(private val context: Context) {
     val cinemaConfig: StateFlow<CinemaConfig> = _cinemaConfig.asStateFlow()
     private val _cinemaCapabilities = MutableStateFlow(cinemaEngine.capabilities)
     val cinemaCapabilities: StateFlow<CinemaHardwareCapabilities> = _cinemaCapabilities.asStateFlow()
+    val rec2020AutoToneParams: StateFlow<Rec2020AutoToneParams> = cinemaEngine.rec2020AutoToneEngine.currentParams
 
     val ultraRes50MStacker = UltraRes50MStacker(context)
     val refocusEngine = RefocusEngine(context)
@@ -1584,7 +1585,28 @@ class Camera2Engine(private val context: Context) {
                     }
                 }
             }
+
+            // Real-time continuous Auto Tone Control for REC.2020 Log Profile
+            if (currentMode == CameraMode.CINEMA && _cinemaConfig.value.colorProfile == CinemaColorProfile.REC_2020) {
+                val lens = _selectedLens.value
+                val chars = if (lens != null) getCharacteristics(lens.cameraId) else null
+                cinemaEngine.rec2020AutoToneEngine.onFrameCaptured(result, chars)
+                onRec2020AutoToneFrame()
+            }
         }
+    }
+
+    private var lastRec2020IspUpdateTime = 0L
+    private fun onRec2020AutoToneFrame() {
+        val now = System.currentTimeMillis()
+        if (now - lastRec2020IspUpdateTime < 66L) return // 15fps throttle for repeating ISP tonemap updates
+        lastRec2020IspUpdateTime = now
+        val session = captureSession ?: return
+        val builder = previewRequestBuilder ?: return
+        try {
+            cinemaEngine.applyToCaptureRequest(builder)
+            session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
+        } catch (ignored: Exception) {}
     }
 
     private fun applyStabilizedCrop(crop: Rect) {

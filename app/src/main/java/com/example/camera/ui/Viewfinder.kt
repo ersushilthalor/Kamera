@@ -76,6 +76,7 @@ fun Viewfinder(
     activeLut: CinematicLut? = null,
     isLutPreviewEnabled: Boolean = false,
     cinemaConfig: CinemaConfig? = null,
+    rec2020AutoToneParams: com.example.camera.engine.Rec2020AutoToneParams? = null,
     isVideoPipelineEnabled: Boolean = true,
     activeVideoPipeline: com.example.camera.pipeline.video.VideoPipelineType = com.example.camera.pipeline.video.VideoPipelineType.IPHONE,
     onSurfaceTextureAvailable: (SurfaceTexture?) -> Unit,
@@ -217,11 +218,27 @@ fun Viewfinder(
                                     hasFilter = true
                                 }
                                 CinemaColorProfile.REC_2020 -> {
-                                    // Rec.2020: natural rich contrast and deep blacks without washed-out milky shadow pedestal
+                                    // REC.2020 Real-Time Auto Tone Control:
+                                    // Continuous real-time Exposure, Highlight roll-off shoulder, Shadow toe lift, Contrast & Inky Black Pedestal
+                                    val p = rec2020AutoToneParams ?: com.example.camera.engine.Rec2020AutoToneParams()
+                                    val expScale = 2.0f.pow(p.exposure * 0.65f)
+                                    val contrastFactor = 1.0f + (p.contrast * 0.35f)
+                                    val fadeoutRecovery = p.fadeout * 0.30f
+                                    val effectiveContrast = contrastFactor + fadeoutRecovery
+                                    val blackOffset = -18f * p.fadeout
+                                    val t = (1.0f - effectiveContrast) * 46f + blackOffset
+                                    val shadowLiftOffset = p.shadows * 22f
+                                    val highlightCompression = 1.0f - (p.highlights * 0.14f)
+
+                                    val r = expScale * effectiveContrast * highlightCompression
+                                    val g = expScale * effectiveContrast * highlightCompression
+                                    val b = expScale * effectiveContrast * highlightCompression
+                                    val totalOffset = t + shadowLiftOffset
+
                                     val rec2020Matrix = android.graphics.ColorMatrix(floatArrayOf(
-                                        1.0f, 0f, 0f, 0f, 0f,
-                                        0f, 1.0f, 0f, 0f, 0f,
-                                        0f, 0f, 1.0f, 0f, 0f,
+                                        r, 0f, 0f, 0f, totalOffset,
+                                        0f, g, 0f, 0f, totalOffset,
+                                        0f, 0f, b, 0f, totalOffset,
                                         0f, 0f, 0f, 1f, 0f
                                     ))
                                     colorMatrix.postConcat(rec2020Matrix)
@@ -233,54 +250,57 @@ fun Viewfinder(
                                 else -> {}
                             }
 
-                            // 2. Washed Out Reduction (recovers deep blacks & midtone contrast from flat profiles)
-                            if (cinemaConfig.washedOut > 0.0f) {
-                                val w = cinemaConfig.washedOut
-                                val pedestalReduction = -28f * w
-                                val contrastBoost = 1.0f + (w * 0.25f)
-                                val t = (1.0f - contrastBoost) * 128f + pedestalReduction
-                                val washedOutMatrix = android.graphics.ColorMatrix(floatArrayOf(
-                                    contrastBoost, 0f, 0f, 0f, t,
-                                    0f, contrastBoost, 0f, 0f, t,
-                                    0f, 0f, contrastBoost, 0f, t,
-                                    0f, 0f, 0f, 1f, 0f
-                                ))
-                                colorMatrix.postConcat(washedOutMatrix)
-                                hasFilter = true
+                            // For non-REC_2020 profiles, apply manual user sliders
+                            if (cinemaConfig.colorProfile != CinemaColorProfile.REC_2020) {
+                                // 2. Washed Out Reduction (recovers deep blacks & midtone contrast from flat profiles)
+                                if (cinemaConfig.washedOut > 0.0f) {
+                                    val w = cinemaConfig.washedOut
+                                    val pedestalReduction = -28f * w
+                                    val contrastBoost = 1.0f + (w * 0.25f)
+                                    val t = (1.0f - contrastBoost) * 128f + pedestalReduction
+                                    val washedOutMatrix = android.graphics.ColorMatrix(floatArrayOf(
+                                        contrastBoost, 0f, 0f, 0f, t,
+                                        0f, contrastBoost, 0f, 0f, t,
+                                        0f, 0f, contrastBoost, 0f, t,
+                                        0f, 0f, 0f, 1f, 0f
+                                    ))
+                                    colorMatrix.postConcat(washedOutMatrix)
+                                    hasFilter = true
+                                }
+
+                                // 3. Real-time Exposure control (+/-) on viewfinder
+                                if (cinemaConfig.exposure != 0.0f) {
+                                    val expMultiplier = 2.0f.pow(cinemaConfig.exposure * 0.75f)
+                                    val expMatrix = android.graphics.ColorMatrix(floatArrayOf(
+                                        expMultiplier, 0f, 0f, 0f, 0f,
+                                        0f, expMultiplier, 0f, 0f, 0f,
+                                        0f, 0f, expMultiplier, 0f, 0f,
+                                        0f, 0f, 0f, 1f, 0f
+                                    ))
+                                    colorMatrix.postConcat(expMatrix)
+                                    hasFilter = true
+                                }
+
+                                // 4. User Contrast control (+/-)
+                                if (cinemaConfig.contrast != 0.0f) {
+                                    val c = 1.0f + (cinemaConfig.contrast * 0.4f)
+                                    val t = (1.0f - c) * 128f
+                                    val contrastMatrix = android.graphics.ColorMatrix(floatArrayOf(
+                                        c, 0f, 0f, 0f, t,
+                                        0f, c, 0f, 0f, t,
+                                        0f, 0f, c, 0f, t,
+                                        0f, 0f, 0f, 1f, 0f
+                                    ))
+                                    colorMatrix.postConcat(contrastMatrix)
+                                    hasFilter = true
+                                }
                             }
 
-                            // 3. Real-time Exposure control (+/-) on viewfinder
-                            if (cinemaConfig.exposure != 0.0f) {
-                                val expMultiplier = 2.0f.pow(cinemaConfig.exposure * 0.75f)
-                                val expMatrix = android.graphics.ColorMatrix(floatArrayOf(
-                                    expMultiplier, 0f, 0f, 0f, 0f,
-                                    0f, expMultiplier, 0f, 0f, 0f,
-                                    0f, 0f, expMultiplier, 0f, 0f,
-                                    0f, 0f, 0f, 1f, 0f
-                                ))
-                                colorMatrix.postConcat(expMatrix)
-                                hasFilter = true
-                            }
-
-                            // 3. User Saturation control (+/-)
+                            // User Saturation control (+/-)
                             if (cinemaConfig.saturation != 1.0f) {
                                 val satMatrix = android.graphics.ColorMatrix()
                                 satMatrix.setSaturation(cinemaConfig.saturation)
                                 colorMatrix.postConcat(satMatrix)
-                                hasFilter = true
-                            }
-
-                            // 4. User Contrast control (+/-)
-                            if (cinemaConfig.contrast != 0.0f) {
-                                val c = 1.0f + (cinemaConfig.contrast * 0.4f)
-                                val t = (1.0f - c) * 128f
-                                val contrastMatrix = android.graphics.ColorMatrix(floatArrayOf(
-                                    c, 0f, 0f, 0f, t,
-                                    0f, c, 0f, 0f, t,
-                                    0f, 0f, c, 0f, t,
-                                    0f, 0f, 0f, 1f, 0f
-                                ))
-                                colorMatrix.postConcat(contrastMatrix)
                                 hasFilter = true
                             }
 

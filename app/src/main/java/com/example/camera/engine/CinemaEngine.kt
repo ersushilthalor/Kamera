@@ -53,11 +53,16 @@ class CinemaEngine(private val context: Context) {
             )
         }
 
+    val rec2020AutoToneEngine = Rec2020AutoToneEngine()
+
     fun updateConfig(newConfig: CinemaConfig) {
         config = newConfig
     }
 
     fun getTonemapCurve(): TonemapCurve {
+        if (config.colorProfile == CinemaColorProfile.REC_2020) {
+            return rec2020AutoToneEngine.getTonemapCurve()
+        }
         val lutForIsp = if (config.shouldBakeLut) config.selectedLut else CinematicLut.NONE
         return generateLogTonemapCurve(
             config.colorProfile,
@@ -216,7 +221,21 @@ class CinemaEngine(private val context: Context) {
             val lutForIsp = if (config.shouldBakeLut) config.selectedLut else CinematicLut.NONE
 
             // 1. Dynamic Hardware Tonemap Curve (Log Transfer + Shadows, Highlights, Contrast, Exposure, Washed-Out + Baked LUT)
-            if (supportsContrastCurve) {
+            if (config.colorProfile == CinemaColorProfile.REC_2020) {
+                // REC.2020 Log Profile with Real-Time Auto Tone Control
+                if (supportsContrastCurve) {
+                    val tonemapCurve = rec2020AutoToneEngine.getTonemapCurve()
+                    builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
+                    builder.set(CaptureRequest.TONEMAP_CURVE, tonemapCurve)
+                } else if (supportsGammaValue) {
+                    val autoParams = rec2020AutoToneEngine.currentParams.value
+                    val adjustedGamma = (2.1f + (autoParams.contrast * 0.35f) + (autoParams.exposure * 0.25f) + (autoParams.fadeout * 0.20f) - (autoParams.shadows * 0.15f)).coerceIn(1.2f, 2.8f)
+                    builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_GAMMA_VALUE)
+                    builder.set(CaptureRequest.TONEMAP_GAMMA, adjustedGamma)
+                } else {
+                    builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)
+                }
+            } else if (supportsContrastCurve) {
                 val tonemapCurve = generateLogTonemapCurve(
                     config.colorProfile,
                     config.shadows,
@@ -325,7 +344,12 @@ class CinemaEngine(private val context: Context) {
         }
 
         // 4. Real Camera2 EV (Exposure Compensation) with live Exposure slider
-        val exposureSliderSteps = (config.exposure * 6f).roundToInt()
+        val effectiveExp = if (config.colorProfile == CinemaColorProfile.REC_2020) {
+            rec2020AutoToneEngine.currentParams.value.exposure
+        } else {
+            config.exposure
+        }
+        val exposureSliderSteps = (effectiveExp * 6f).roundToInt()
         val totalExposureComp = (config.exposureCompensation + exposureSliderSteps)
             .coerceIn(aeCompensationRange.lower, aeCompensationRange.upper)
         builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, totalExposureComp)

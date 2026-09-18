@@ -53,6 +53,7 @@ import com.example.camera.ui.components.FrostedGlassBox
 fun CinemaSettingsWindow(
     config: CinemaConfig,
     capabilities: CinemaHardwareCapabilities,
+    rec2020AutoToneParams: com.example.camera.engine.Rec2020AutoToneParams? = null,
     onConfigChange: (CinemaConfig) -> Unit,
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier
@@ -1151,6 +1152,54 @@ fun CinemaSettingsWindow(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                val isRec2020 = config.colorProfile == CinemaColorProfile.REC_2020
+
+                if (isRec2020) {
+                    // REC.2020 Real-Time Auto Tone Control Banner
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .background(Color(0xFF1E2819), RoundedCornerShape(10.dp))
+                            .border(1.dp, Color(0xFF66BB6A).copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Column {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color(0xFF66BB6A), RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "AUTO TONE",
+                                        color = Color.Black,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
+                                Text(
+                                    text = "REC.2020 REAL-TIME AUTO CONTROL",
+                                    color = Color(0xFF81C784),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Exposure, Highlights, Shadows, Contrast, and Fadeout adapt continuously to scene illumination, balancing bright skies and foreground detail.",
+                                color = Color.White.copy(alpha = 0.8f),
+                                fontSize = 9.5.sp,
+                                lineHeight = 13.sp
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
                 // Exposure, Shadows, Highlights, Contrast, Saturation Sliders
                 // Exposure Slider (Real-time Preview & Recording)
                 Row(
@@ -1158,27 +1207,55 @@ fun CinemaSettingsWindow(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "Exposure",
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        if (isRec2020) {
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFF66BB6A).copy(alpha = 0.25f), RoundedCornerShape(3.dp))
+                                    .border(0.5.dp, Color(0xFF66BB6A), RoundedCornerShape(3.dp))
+                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                            ) {
+                                Text(
+                                    text = "AUTO",
+                                    color = Color(0xFF81C784),
+                                    fontSize = 8.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
                     Text(
-                        text = "Exposure",
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = if (config.exposure == 0.0f) "0.0" else "%.2f".format(config.exposure),
-                        color = Color(0xFFFFD54F),
+                        text = if (isRec2020) {
+                            "%+.2f EV (Auto)".format(rec2020AutoToneParams?.exposure ?: 0f)
+                        } else {
+                            if (config.exposure == 0.0f) "0.0" else "%.2f".format(config.exposure)
+                        },
+                        color = if (isRec2020) Color(0xFF81C784) else Color(0xFFFFD54F),
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
                 Slider(
-                    value = config.exposure,
-                    onValueChange = { onConfigChange(config.copy(exposure = it)) },
+                    value = if (isRec2020) (rec2020AutoToneParams?.exposure ?: 0f) else config.exposure,
+                    onValueChange = { if (!isRec2020) onConfigChange(config.copy(exposure = it)) },
                     valueRange = -1.0f..1.0f,
+                    enabled = !isRec2020,
                     colors = SliderDefaults.colors(
-                        thumbColor = Color(0xFFFFD54F),
-                        activeTrackColor = Color(0xFFFFD54F),
-                        inactiveTrackColor = Color(0xFF33333C)
+                        thumbColor = if (isRec2020) Color(0xFF66BB6A) else Color(0xFFFFD54F),
+                        activeTrackColor = if (isRec2020) Color(0xFF66BB6A) else Color(0xFFFFD54F),
+                        inactiveTrackColor = Color(0xFF33333C),
+                        disabledThumbColor = Color(0xFF66BB6A),
+                        disabledActiveTrackColor = Color(0xFF66BB6A).copy(alpha = 0.8f),
+                        disabledInactiveTrackColor = Color(0xFF2E3D28)
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1194,27 +1271,55 @@ fun CinemaSettingsWindow(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "Shadows",
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        if (isRec2020) {
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFF66BB6A).copy(alpha = 0.25f), RoundedCornerShape(3.dp))
+                                    .border(0.5.dp, Color(0xFF66BB6A), RoundedCornerShape(3.dp))
+                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                            ) {
+                                Text(
+                                    text = "AUTO",
+                                    color = Color(0xFF81C784),
+                                    fontSize = 8.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
                     Text(
-                        text = "Shadows",
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = if (config.shadows == 0.0f) "0.0" else "%.1f".format(config.shadows),
-                        color = Color(0xFFFFD54F),
+                        text = if (isRec2020) {
+                            "+%d%% Lift (Auto)".format(((rec2020AutoToneParams?.shadows ?: 0.3f) * 100).toInt())
+                        } else {
+                            if (config.shadows == 0.0f) "0.0" else "%.1f".format(config.shadows)
+                        },
+                        color = if (isRec2020) Color(0xFF81C784) else Color(0xFFFFD54F),
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
                 Slider(
-                    value = config.shadows,
-                    onValueChange = { onConfigChange(config.copy(shadows = it)) },
+                    value = if (isRec2020) (rec2020AutoToneParams?.shadows ?: 0.3f) else config.shadows,
+                    onValueChange = { if (!isRec2020) onConfigChange(config.copy(shadows = it)) },
                     valueRange = -1.0f..1.0f,
+                    enabled = !isRec2020,
                     colors = SliderDefaults.colors(
-                        thumbColor = Color(0xFFFFD54F),
-                        activeTrackColor = Color(0xFFFFD54F),
-                        inactiveTrackColor = Color(0xFF33333C)
+                        thumbColor = if (isRec2020) Color(0xFF66BB6A) else Color(0xFFFFD54F),
+                        activeTrackColor = if (isRec2020) Color(0xFF66BB6A) else Color(0xFFFFD54F),
+                        inactiveTrackColor = Color(0xFF33333C),
+                        disabledThumbColor = Color(0xFF66BB6A),
+                        disabledActiveTrackColor = Color(0xFF66BB6A).copy(alpha = 0.8f),
+                        disabledInactiveTrackColor = Color(0xFF2E3D28)
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1230,27 +1335,64 @@ fun CinemaSettingsWindow(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Column {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "Highlights",
+                                color = Color.White.copy(alpha = 0.85f),
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            if (isRec2020) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color(0xFF66BB6A).copy(alpha = 0.25f), RoundedCornerShape(3.dp))
+                                        .border(0.5.dp, Color(0xFF66BB6A), RoundedCornerShape(3.dp))
+                                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                                ) {
+                                    Text(
+                                        text = "AUTO",
+                                        color = Color(0xFF81C784),
+                                        fontSize = 8.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                        if (isRec2020) {
+                            Text(
+                                text = "Smooth shoulder roll-off protecting sky without darkening foreground",
+                                color = Color(0xFF81C784).copy(alpha = 0.85f),
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
                     Text(
-                        text = "Highlights",
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = if (config.highlights == 0.0f) "0.0" else "%.1f".format(config.highlights),
-                        color = Color(0xFFFFD54F),
+                        text = if (isRec2020) {
+                            "%d%% Roll-off (Auto)".format(((rec2020AutoToneParams?.highlights ?: 0.45f) * 100).toInt())
+                        } else {
+                            if (config.highlights == 0.0f) "0.0" else "%.1f".format(config.highlights)
+                        },
+                        color = if (isRec2020) Color(0xFF81C784) else Color(0xFFFFD54F),
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
                 Slider(
-                    value = config.highlights,
-                    onValueChange = { onConfigChange(config.copy(highlights = it)) },
+                    value = if (isRec2020) (rec2020AutoToneParams?.highlights ?: 0.45f) else config.highlights,
+                    onValueChange = { if (!isRec2020) onConfigChange(config.copy(highlights = it)) },
                     valueRange = -1.0f..1.0f,
+                    enabled = !isRec2020,
                     colors = SliderDefaults.colors(
-                        thumbColor = Color(0xFFFFD54F),
-                        activeTrackColor = Color(0xFFFFD54F),
-                        inactiveTrackColor = Color(0xFF33333C)
+                        thumbColor = if (isRec2020) Color(0xFF66BB6A) else Color(0xFFFFD54F),
+                        activeTrackColor = if (isRec2020) Color(0xFF66BB6A) else Color(0xFFFFD54F),
+                        inactiveTrackColor = Color(0xFF33333C),
+                        disabledThumbColor = Color(0xFF66BB6A),
+                        disabledActiveTrackColor = Color(0xFF66BB6A).copy(alpha = 0.8f),
+                        disabledInactiveTrackColor = Color(0xFF2E3D28)
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1266,27 +1408,55 @@ fun CinemaSettingsWindow(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "Contrast",
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        if (isRec2020) {
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFF66BB6A).copy(alpha = 0.25f), RoundedCornerShape(3.dp))
+                                    .border(0.5.dp, Color(0xFF66BB6A), RoundedCornerShape(3.dp))
+                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                            ) {
+                                Text(
+                                    text = "AUTO",
+                                    color = Color(0xFF81C784),
+                                    fontSize = 8.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
                     Text(
-                        text = "Contrast",
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = if (config.contrast == 0.0f) "0.0" else "%.1f".format(config.contrast),
-                        color = Color(0xFFFFD54F),
+                        text = if (isRec2020) {
+                            "%+.2f (Auto)".format(rec2020AutoToneParams?.contrast ?: 0f)
+                        } else {
+                            if (config.contrast == 0.0f) "0.0" else "%.1f".format(config.contrast)
+                        },
+                        color = if (isRec2020) Color(0xFF81C784) else Color(0xFFFFD54F),
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
                 Slider(
-                    value = config.contrast,
-                    onValueChange = { onConfigChange(config.copy(contrast = it)) },
+                    value = if (isRec2020) (rec2020AutoToneParams?.contrast ?: 0f) else config.contrast,
+                    onValueChange = { if (!isRec2020) onConfigChange(config.copy(contrast = it)) },
                     valueRange = -1.0f..1.0f,
+                    enabled = !isRec2020,
                     colors = SliderDefaults.colors(
-                        thumbColor = Color(0xFFFFD54F),
-                        activeTrackColor = Color(0xFFFFD54F),
-                        inactiveTrackColor = Color(0xFF33333C)
+                        thumbColor = if (isRec2020) Color(0xFF66BB6A) else Color(0xFFFFD54F),
+                        activeTrackColor = if (isRec2020) Color(0xFF66BB6A) else Color(0xFFFFD54F),
+                        inactiveTrackColor = Color(0xFF33333C),
+                        disabledThumbColor = Color(0xFF66BB6A),
+                        disabledActiveTrackColor = Color(0xFF66BB6A).copy(alpha = 0.8f),
+                        disabledInactiveTrackColor = Color(0xFF2E3D28)
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1332,40 +1502,68 @@ fun CinemaSettingsWindow(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // Washed Out / Contrast Recovery Slider
+                // Washed Out / Contrast Recovery / Fadeout Slider
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = if (isRec2020) "Fadeout / Black Pedestal" else "Washed Out Reduction",
+                                color = Color.White.copy(alpha = 0.85f),
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            if (isRec2020) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color(0xFF66BB6A).copy(alpha = 0.25f), RoundedCornerShape(3.dp))
+                                        .border(0.5.dp, Color(0xFF66BB6A), RoundedCornerShape(3.dp))
+                                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                                ) {
+                                    Text(
+                                        text = "AUTO",
+                                        color = Color(0xFF81C784),
+                                        fontSize = 8.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
                         Text(
-                            text = "Washed Out Reduction",
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "Restores natural black depth & contrast",
+                            text = if (isRec2020) "Pins black pedestal to 0.0 & enhances midtone separation" else "Restores natural black depth & contrast",
                             color = Color.White.copy(alpha = 0.5f),
                             fontSize = 9.5.sp
                         )
                     }
                     Text(
-                        text = "${(config.washedOut * 100f).toInt()}%",
-                        color = Color(0xFFFFD54F),
+                        text = if (isRec2020) {
+                            "%d%% Inky (Auto)".format(((rec2020AutoToneParams?.fadeout ?: 0.5f) * 100).toInt())
+                        } else {
+                            "${(config.washedOut * 100f).toInt()}%"
+                        },
+                        color = if (isRec2020) Color(0xFF81C784) else Color(0xFFFFD54F),
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
                 Slider(
-                    value = config.washedOut,
-                    onValueChange = { onConfigChange(config.copy(washedOut = it)) },
+                    value = if (isRec2020) (rec2020AutoToneParams?.fadeout ?: 0.5f) else config.washedOut,
+                    onValueChange = { if (!isRec2020) onConfigChange(config.copy(washedOut = it)) },
                     valueRange = 0.0f..1.0f,
+                    enabled = !isRec2020,
                     colors = SliderDefaults.colors(
-                        thumbColor = Color(0xFFFFD54F),
-                        activeTrackColor = Color(0xFFFFD54F),
-                        inactiveTrackColor = Color(0xFF33333C)
+                        thumbColor = if (isRec2020) Color(0xFF66BB6A) else Color(0xFFFFD54F),
+                        activeTrackColor = if (isRec2020) Color(0xFF66BB6A) else Color(0xFFFFD54F),
+                        inactiveTrackColor = Color(0xFF33333C),
+                        disabledThumbColor = Color(0xFF66BB6A),
+                        disabledActiveTrackColor = Color(0xFF66BB6A).copy(alpha = 0.8f),
+                        disabledInactiveTrackColor = Color(0xFF2E3D28)
                     ),
                     modifier = Modifier
                         .fillMaxWidth()

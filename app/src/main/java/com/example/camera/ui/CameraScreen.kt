@@ -126,6 +126,7 @@ fun CameraScreen(
 
     val cinemaConfig by viewModel.cinemaConfig.collectAsStateWithLifecycle()
     val cinemaCapabilities by viewModel.cinemaCapabilities.collectAsStateWithLifecycle()
+    val rec2020AutoToneParams by viewModel.rec2020AutoToneParams.collectAsStateWithLifecycle()
     val isCinemaSettingsOpen by viewModel.isCinemaSettingsOpen.collectAsStateWithLifecycle()
     val isMoreModesOpen by viewModel.isMoreModesOpen.collectAsStateWithLifecycle()
 
@@ -268,6 +269,7 @@ fun CameraScreen(
             activeLut = cinemaConfig.selectedLut,
             isLutPreviewEnabled = cinemaConfig.isLutPreviewEnabled,
             cinemaConfig = cinemaConfig,
+            rec2020AutoToneParams = rec2020AutoToneParams,
             isVideoPipelineEnabled = isVideoPipelineEnabled,
             activeVideoPipeline = activeVideoPipeline,
             onSurfaceTextureAvailable = { texture ->
@@ -559,6 +561,7 @@ fun CameraScreen(
             CinemaSettingsWindow(
                 config = cinemaConfig,
                 capabilities = cinemaCapabilities,
+                rec2020AutoToneParams = rec2020AutoToneParams,
                 onConfigChange = { updatedConfig ->
                     viewModel.updateCinemaConfig(updatedConfig)
                 },
