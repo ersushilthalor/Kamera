@@ -206,6 +206,9 @@ fun CameraScreen(
     val isPipelineSheetOpen by viewModel.isPipelineSheetOpen.collectAsStateWithLifecycle()
     val isBeforeAfterOpen by viewModel.isBeforeAfterOpen.collectAsStateWithLifecycle()
     val latestPipelineCapture by viewModel.latestPipelineCapture.collectAsStateWithLifecycle()
+    val isVideoPipelineEnabled by viewModel.isVideoPipelineEnabled.collectAsStateWithLifecycle()
+    val activeVideoPipeline by viewModel.activeVideoPipeline.collectAsStateWithLifecycle()
+    val isVideoPipelineSheetOpen by viewModel.isVideoPipelineSheetOpen.collectAsStateWithLifecycle()
 
     var isCustomUiStudioOpen by remember { mutableStateOf(false) }
 
@@ -265,6 +268,8 @@ fun CameraScreen(
             activeLut = cinemaConfig.selectedLut,
             isLutPreviewEnabled = cinemaConfig.isLutPreviewEnabled,
             cinemaConfig = cinemaConfig,
+            isVideoPipelineEnabled = isVideoPipelineEnabled,
+            activeVideoPipeline = activeVideoPipeline,
             onSurfaceTextureAvailable = { texture ->
                 viewModel.engine.setPreviewSurfaceTexture(texture)
             },
@@ -413,6 +418,10 @@ fun CameraScreen(
             },
             onVideoQualityClick = { viewModel.cycleVideoQuality() },
             onVideoSettingsClick = { viewModel.toggleVideoSettingsPanel() },
+            isVideoPipelineEnabled = isVideoPipelineEnabled,
+            activeVideoPipeline = activeVideoPipeline,
+            onVideoPipelineClick = { viewModel.cycleNextVideoPipeline() },
+            onVideoPipelineLongClick = { viewModel.setVideoPipelineSheetOpen(true) },
             onToggleMegapixelMode = { viewModel.togglePhotoMegapixelMode() },
             onDollyZoomClick = {
                 if (cameraMode == CameraMode.DOLLY_ZOOM) {
@@ -828,6 +837,14 @@ fun CameraScreen(
                 viewModel.setSettingsOpen(false)
                 viewModel.setBeforeAfterOpen(true)
             },
+            isVideoPipelineEnabled = isVideoPipelineEnabled,
+            activeVideoPipeline = activeVideoPipeline,
+            onVideoPipelineToggle = { viewModel.toggleVideoPipelineEnabled(it) },
+            onSelectVideoPipeline = { viewModel.selectVideoPipeline(it) },
+            onOpenVideoPipelineSheet = {
+                viewModel.setSettingsOpen(false)
+                viewModel.setVideoPipelineSheetOpen(true)
+            },
             instantSwitchState = instantSwitchState,
             onKeepUltraWideReadyToggle = { viewModel.setKeepUltraWideReady(it) },
             onShowUltraWidePreviewToggle = { viewModel.setShowUltraWidePreview(it) },
@@ -877,6 +894,14 @@ fun CameraScreen(
             com.example.camera.pipeline.ui.CustomPipelineBottomSheet(
                 viewModel = viewModel,
                 onDismissRequest = { viewModel.setPipelineSheetOpen(false) }
+            )
+        }
+
+        // 9b. Real Hardware Video Processing Pipeline Bottom Sheet
+        if (isVideoPipelineSheetOpen) {
+            com.example.camera.pipeline.video.VideoPipelineBottomSheet(
+                viewModel = viewModel,
+                onDismissRequest = { viewModel.setVideoPipelineSheetOpen(false) }
             )
         }
 

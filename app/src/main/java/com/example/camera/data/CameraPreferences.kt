@@ -1075,6 +1075,25 @@ class CameraPreferences(context: Context) {
         prefs.edit().clear().apply()
     }
 
+    // --- Custom Video Processing Pipeline Persistence ---
+
+    var isVideoPipelineEnabled: Boolean
+        get() = prefs.getBoolean("pref_video_pipeline_enabled", true)
+        set(value) = prefs.edit().putBoolean("pref_video_pipeline_enabled", value).apply()
+
+    var activeVideoPipelineId: String
+        get() = prefs.getString("pref_active_video_pipeline_id", com.example.camera.pipeline.video.VideoPipelineType.IPHONE.id)
+            ?: com.example.camera.pipeline.video.VideoPipelineType.IPHONE.id
+        set(value) = prefs.edit().putString("pref_active_video_pipeline_id", value).apply()
+
+    fun getActiveVideoPipeline(): com.example.camera.pipeline.video.VideoPipelineType {
+        return com.example.camera.pipeline.video.VideoPipelineType.fromId(activeVideoPipelineId)
+    }
+
+    fun saveActiveVideoPipeline(pipeline: com.example.camera.pipeline.video.VideoPipelineType) {
+        activeVideoPipelineId = pipeline.id
+    }
+
     // --- Custom Image Processing Pipeline Persistence ---
 
     var isCustomPipelineEnabled: Boolean

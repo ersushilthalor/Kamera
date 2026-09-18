@@ -232,6 +232,12 @@ class Camera2Engine(private val context: Context) {
     private val _videoHdrState = MutableStateFlow(videoHdrEngine.currentState)
     val videoHdrState: StateFlow<VideoHdrState> = _videoHdrState.asStateFlow()
 
+    val videoPipelineEngine = com.example.camera.pipeline.video.VideoPipelineEngine()
+    private val _activeVideoPipeline = MutableStateFlow(preferences.getActiveVideoPipeline())
+    val activeVideoPipeline: StateFlow<com.example.camera.pipeline.video.VideoPipelineType> = _activeVideoPipeline.asStateFlow()
+    private val _isVideoPipelineEnabled = MutableStateFlow(preferences.isVideoPipelineEnabled)
+    val isVideoPipelineEnabled: StateFlow<Boolean> = _isVideoPipelineEnabled.asStateFlow()
+
     val cinemaEngine = CinemaEngine(context)
     private val _cinemaConfig = MutableStateFlow(cinemaEngine.config)
     val cinemaConfig: StateFlow<CinemaConfig> = _cinemaConfig.asStateFlow()
@@ -252,6 +258,8 @@ class Camera2Engine(private val context: Context) {
     val zoomProgress: StateFlow<Float> = _zoomProgress.asStateFlow()
 
     init {
+        videoPipelineEngine.setPipeline(preferences.getActiveVideoPipeline())
+        videoPipelineEngine.setEnabled(preferences.isVideoPipelineEnabled)
         videoHdrEngine.onStateChangedListener = { state ->
             _videoHdrState.value = state
         }
@@ -1847,6 +1855,16 @@ class Camera2Engine(private val context: Context) {
             cinemaEngine.applyToCaptureRequest(builder)
         }
 
+        // Dedicated Real Hardware Video Processing Pipeline (iPhone / DSLR / Samsung)
+        if (currentMode == CameraMode.VIDEO && videoPipelineEngine.isEnabled.value) {
+            val currentIsoVal = manualIso ?: 100
+            videoPipelineEngine.applyToCaptureRequest(
+                builder = builder,
+                capabilities = caps,
+                currentIso = currentIsoVal
+            )
+        }
+
         // Digital Zoom / Crop Region
         applyZoom(builder)
     }
@@ -1984,6 +2002,30 @@ class Camera2Engine(private val context: Context) {
     fun setVideoHdrManualSaturation(value: Int) {
         videoHdrEngine.manualSaturation = value
         _videoHdrState.value = videoHdrEngine.currentState
+        if (currentMode == CameraMode.VIDEO) {
+            updatePreviewSettings()
+        }
+    }
+
+    /**
+     * Switch Hardware Video Processing Pipeline (iPhone, DSLR, Samsung)
+     */
+    fun setVideoPipeline(pipeline: com.example.camera.pipeline.video.VideoPipelineType) {
+        _activeVideoPipeline.value = pipeline
+        videoPipelineEngine.setPipeline(pipeline)
+        preferences.saveActiveVideoPipeline(pipeline)
+        if (currentMode == CameraMode.VIDEO) {
+            updatePreviewSettings()
+        }
+    }
+
+    /**
+     * Enable/Disable Custom Video Processing Pipeline
+     */
+    fun setVideoPipelineEnabled(enabled: Boolean) {
+        _isVideoPipelineEnabled.value = enabled
+        videoPipelineEngine.setEnabled(enabled)
+        preferences.isVideoPipelineEnabled = enabled
         if (currentMode == CameraMode.VIDEO) {
             updatePreviewSettings()
         }
@@ -3432,7 +3474,7 @@ class Camera2Engine(private val context: Context) {
             val isHdrVideoActive = (currentMode == CameraMode.VIDEO && videoHdrEngine.mode != VideoHdrMode.OFF)
             val is10BitRequested = (isCinema && (cinemaConfig.value.logBitDepth == LogBitDepth.BIT_10 || cinemaCodec == CinemaCodec.PRORES)) ||
                     (isHdrVideoActive && cinemaCapabilities.value.supports10BitRecording)
-            val bitrate = if (isCinema) {
+            val baseBitrate = if (isCinema) {
                 when {
                     cinemaCodec == CinemaCodec.PRORES -> {
                         when {
@@ -3459,6 +3501,11 @@ class Camera2Engine(private val context: Context) {
                     videoRes.width >= 1920 -> 20_000_000
                     else -> 10_000_000
                 }
+            }
+            val bitrate = if (currentMode == CameraMode.VIDEO && videoPipelineEngine.isEnabled.value) {
+                videoPipelineEngine.getEncoderBitrate(videoRes.width, videoRes.height, baseBitrate)
+            } else {
+                baseBitrate
             }
             val targetFps = if (isCinema) cinemaConfig.value.videoFps else videoFps
             val isSoftwareCinema = isCinema && (cinemaCodec == CinemaCodec.PRORES || cinemaCodec == CinemaCodec.VP9)

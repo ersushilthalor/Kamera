@@ -76,6 +76,8 @@ fun Viewfinder(
     activeLut: CinematicLut? = null,
     isLutPreviewEnabled: Boolean = false,
     cinemaConfig: CinemaConfig? = null,
+    isVideoPipelineEnabled: Boolean = true,
+    activeVideoPipeline: com.example.camera.pipeline.video.VideoPipelineType = com.example.camera.pipeline.video.VideoPipelineType.IPHONE,
     onSurfaceTextureAvailable: (SurfaceTexture?) -> Unit,
     onTapToFocus: (Offset, Float, Float) -> Unit,
     onZoomChange: (Float) -> Unit,
@@ -292,6 +294,17 @@ fun Viewfinder(
                                     hasFilter = true
                                 }
                             }
+                        } else if (cameraMode == CameraMode.VIDEO && isVideoPipelineEnabled && activeVideoPipeline != com.example.camera.pipeline.video.VideoPipelineType.OFF) {
+                            val pipelineMat = when (activeVideoPipeline) {
+                                com.example.camera.pipeline.video.VideoPipelineType.IPHONE -> com.example.camera.pipeline.video.IPhoneVideoPipeline().getPreviewColorMatrix()
+                                com.example.camera.pipeline.video.VideoPipelineType.DSLR -> com.example.camera.pipeline.video.DslrVideoPipeline().getPreviewColorMatrix()
+                                com.example.camera.pipeline.video.VideoPipelineType.SAMSUNG -> com.example.camera.pipeline.video.SamsungVideoPipeline().getPreviewColorMatrix()
+                                else -> null
+                            }
+                            if (pipelineMat != null) {
+                                colorMatrix.postConcat(pipelineMat)
+                                hasFilter = true
+                            }
                         } else if (cameraMode == CameraMode.PHOTO && activePhotoFilter != null && activePhotoFilter != PhotoFilter.ORIGINAL) {
                             val filterMat = activePhotoFilter.toAndroidColorMatrix()
                             if (filterMat != null) {
@@ -311,7 +324,7 @@ fun Viewfinder(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Optional Non-Destructive Live LUT / Filter Monitoring Badge
+                // Optional Non-Destructive Live LUT / Filter / Video Pipeline Monitoring Badge
                 val badgeLut = activeLut ?: cinemaConfig?.selectedLut
                 val badgeLutPreview = isLutPreviewEnabled || (cinemaConfig?.isLutPreviewEnabled == true)
                 if (cameraMode == CameraMode.CINEMA && badgeLutPreview && badgeLut != null && badgeLut != CinematicLut.NONE) {
@@ -327,6 +340,24 @@ fun Viewfinder(
                         Text(
                             text = "LUT: ${badgeLut.label} (PREVIEW)",
                             color = badgeLut.accentColor,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                } else if (cameraMode == CameraMode.VIDEO && isVideoPipelineEnabled && activeVideoPipeline != com.example.camera.pipeline.video.VideoPipelineType.OFF) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(8.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xCC111318))
+                            .border(1.dp, activeVideoPipeline.accentColor.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "PIPE: ${activeVideoPipeline.badgeLabel}",
+                            color = activeVideoPipeline.accentColor,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.5.sp

@@ -367,6 +367,9 @@ data class HardwareCapabilities(
     val supportedVideoResolutions: List<CameraResolution> = emptyList(),
     val supportedFpsRanges: List<Int> = listOf(30, 60),
     val supportsTonemapCurve: Boolean = false,
+    val supportsColorTransform: Boolean = true,
+    val supportsEdgeMode: Boolean = true,
+    val supportsNoiseReduction: Boolean = true,
     val minZoom: Float = 1.0f,
     val maxZoom: Float = 8f
 )

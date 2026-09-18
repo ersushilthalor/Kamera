@@ -253,6 +253,41 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         preferences.saveCinemaConfig(config)
     }
 
+    // --- Custom Video Processing Pipeline (Hardware ISP Video Pipeline Switching) ---
+    private val _isVideoPipelineEnabled = MutableStateFlow(preferences.isVideoPipelineEnabled)
+    val isVideoPipelineEnabled: StateFlow<Boolean> = _isVideoPipelineEnabled.asStateFlow()
+
+    private val _activeVideoPipeline = MutableStateFlow(preferences.getActiveVideoPipeline())
+    val activeVideoPipeline: StateFlow<com.example.camera.pipeline.video.VideoPipelineType> = _activeVideoPipeline.asStateFlow()
+
+    private val _isVideoPipelineSheetOpen = MutableStateFlow(false)
+    val isVideoPipelineSheetOpen: StateFlow<Boolean> = _isVideoPipelineSheetOpen.asStateFlow()
+
+    fun toggleVideoPipelineEnabled(enabled: Boolean) {
+        _isVideoPipelineEnabled.value = enabled
+        preferences.isVideoPipelineEnabled = enabled
+        engine.setVideoPipelineEnabled(enabled)
+        showToast(if (enabled) "Video Pipeline: ON (${_activeVideoPipeline.value.displayName})" else "Video Pipeline: OFF (Standard)")
+    }
+
+    fun selectVideoPipeline(pipeline: com.example.camera.pipeline.video.VideoPipelineType) {
+        _activeVideoPipeline.value = pipeline
+        preferences.saveActiveVideoPipeline(pipeline)
+        engine.setVideoPipeline(pipeline)
+        showToast("Switched to ${pipeline.displayName}")
+    }
+
+    fun cycleNextVideoPipeline() {
+        val selectable = com.example.camera.pipeline.video.VideoPipelineType.SELECTABLE_PIPELINES
+        val currentIndex = selectable.indexOf(_activeVideoPipeline.value)
+        val nextIndex = if (currentIndex < 0 || currentIndex >= selectable.size - 1) 0 else currentIndex + 1
+        selectVideoPipeline(selectable[nextIndex])
+    }
+
+    fun setVideoPipelineSheetOpen(isOpen: Boolean) {
+        _isVideoPipelineSheetOpen.value = isOpen
+    }
+
     // --- Custom Image Processing Pipeline (RAW/YUV Uncompressed Processing) ---
     private val _isCustomPipelineEnabled = MutableStateFlow(preferences.isCustomPipelineEnabled)
     val isCustomPipelineEnabled: StateFlow<Boolean> = _isCustomPipelineEnabled.asStateFlow()
