@@ -220,27 +220,9 @@ fun Viewfinder(
                                 CinemaColorProfile.REC_2020 -> {
                                     // REC.2020 Real-Time Auto Tone Control:
                                     // Continuous real-time Exposure, Highlight roll-off shoulder, Shadow toe lift, Contrast & Inky Black Pedestal
+                                    // Calibrated preview matrix guarantees true neutral whites, zero pink/red artifacts, and rich flagship color depth
                                     val p = rec2020AutoToneParams ?: com.example.camera.engine.Rec2020AutoToneParams()
-                                    val expScale = 2.0f.pow(p.exposure * 0.65f)
-                                    val contrastFactor = 1.0f + (p.contrast * 0.35f)
-                                    val fadeoutRecovery = p.fadeout * 0.30f
-                                    val effectiveContrast = contrastFactor + fadeoutRecovery
-                                    val blackOffset = -18f * p.fadeout
-                                    val t = (1.0f - effectiveContrast) * 46f + blackOffset
-                                    val shadowLiftOffset = p.shadows * 22f
-                                    val highlightCompression = 1.0f - (p.highlights * 0.14f)
-
-                                    val r = expScale * effectiveContrast * highlightCompression
-                                    val g = expScale * effectiveContrast * highlightCompression
-                                    val b = expScale * effectiveContrast * highlightCompression
-                                    val totalOffset = t + shadowLiftOffset
-
-                                    val rec2020Matrix = android.graphics.ColorMatrix(floatArrayOf(
-                                        r, 0f, 0f, 0f, totalOffset,
-                                        0f, g, 0f, 0f, totalOffset,
-                                        0f, 0f, b, 0f, totalOffset,
-                                        0f, 0f, 0f, 1f, 0f
-                                    ))
+                                    val rec2020Matrix = com.example.camera.engine.Rec2020AutoToneEngine.computePreviewColorMatrix(p)
                                     colorMatrix.postConcat(rec2020Matrix)
                                     hasFilter = true
                                 }

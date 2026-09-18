@@ -21,16 +21,16 @@ class Rec2020AutoToneEngineTest {
         assertEquals(0.45f, params.highlights, 0.01f)
         assertEquals(0.30f, params.shadows, 0.01f)
         assertEquals(0.0f, params.contrast, 0.01f)
-        assertEquals(0.50f, params.fadeout, 0.01f)
+        assertEquals(0.55f, params.fadeout, 0.01f)
     }
 
     @Test
     fun testBrightSkyAndDarkForegroundSceneBalancing() {
         // Simulate high dynamic range daylight scene with bright sky
-        // sensorFlux = 0.015f represents intense daylight sky
+        // ev100 = 14.5f represents intense sunny outdoor daylight
         for (i in 0 until 60) {
             engine.processSceneIllumination(
-                sensorFlux = 0.015f,
+                ev100 = 14.5f,
                 hasFace = true,
                 maxFaceArea = 120_000
             )
@@ -45,7 +45,7 @@ class Rec2020AutoToneEngineTest {
         assertTrue("Shadows should be lifted to protect foreground detail", params.shadows > 0.35f)
 
         // Scene should NOT aggressively darken the whole scene to save the sky (exposure should stay healthy)
-        assertTrue("Exposure must not be crushed to save sky; midtones remain balanced", params.exposure >= -0.10f)
+        assertTrue("Exposure must not be crushed to save sky; midtones remain balanced", params.exposure >= 0.0f)
 
         // Fadeout should remain active to avoid milky shadow pedestal
         assertTrue("Fadeout should keep inky blacks", params.fadeout >= 0.40f)
@@ -56,7 +56,7 @@ class Rec2020AutoToneEngineTest {
         val initialExposure = engine.currentParams.value.exposure
 
         // Single sudden frame spike in brightness
-        engine.processSceneIllumination(sensorFlux = 0.005f)
+        engine.processSceneIllumination(ev100 = 15.0f)
 
         val immediateExposure = engine.currentParams.value.exposure
         val diff = kotlin.math.abs(immediateExposure - initialExposure)

@@ -56,6 +56,102 @@ class CinemaPipelineVerificationTest {
     }
 
     @Test
+    fun testRec2020AutoTonePrioritiesNeverDarkensSceneForSky() {
+        val engine = Rec2020AutoToneEngine()
+
+        // 1. Simulate intense sunny outdoor daylight (EV100 = 15.0)
+        for (i in 0 until 40) {
+            engine.processSceneIllumination(ev100 = 15.0f, hasFace = false)
+        }
+        val outdoorParams = engine.currentParams.value
+
+        // Priority 1: Overall scene/subject exposure - NEVER darken scene just to save sky!
+        assertTrue("Outdoor exposure must never be negative, got ${outdoorParams.exposure}", outdoorParams.exposure >= 0.0f)
+        // Priority 2: Shadow detail must be lifted in high-contrast outdoor light
+        assertTrue("Shadows should be lifted in daylight, got ${outdoorParams.shadows}", outdoorParams.shadows >= 0.40f)
+        // Priority 4 & 5: Highlight roll-off shoulder protects clouds smoothly
+        assertTrue("Highlight shoulder should be active, got ${outdoorParams.highlights}", outdoorParams.highlights >= 0.60f)
+        assertTrue("Sky protection should be active", outdoorParams.skyProtectionActive)
+
+        // 2. Simulate indoor room lighting (EV100 = 7.0)
+        for (i in 0 until 40) {
+            engine.processSceneIllumination(ev100 = 7.0f, hasFace = false)
+        }
+        val indoorParams = engine.currentParams.value
+
+        // Indoor exposure remains positive and balanced
+        assertTrue("Indoor exposure should be natural, got ${indoorParams.exposure}", indoorParams.exposure in 0.0f..0.20f)
+        // Indoor shadows need less aggressive lift
+        assertTrue("Indoor shadows should be natural, got ${indoorParams.shadows}", indoorParams.shadows < outdoorParams.shadows)
+        assertFalse("Sky protection should be inactive indoors", indoorParams.skyProtectionActive)
+    }
+
+    @Test
+    fun testRec2020NoRedPinkArtifactsAndMonotonicCurves() {
+        val engine = Rec2020AutoToneEngine()
+        // Run with aggressive daylight highlights
+        for (i in 0 until 30) {
+            engine.processSceneIllumination(ev100 = 14.5f, hasFace = true, maxFaceArea = 150_000)
+        }
+
+        val curve = engine.getTonemapCurve(64)
+        val count = curve.getPointCount(TonemapCurve.CHANNEL_RED)
+        assertEquals(64, count)
+
+        var prevY = -0.001f
+        for (i in 0 until count) {
+            val ptR = curve.getPoint(TonemapCurve.CHANNEL_RED, i)
+            val ptG = curve.getPoint(TonemapCurve.CHANNEL_GREEN, i)
+            val ptB = curve.getPoint(TonemapCurve.CHANNEL_BLUE, i)
+
+            // Red, Green, Blue MUST be strictly identical across all 64 points (eliminates false color & pink/red tint)
+            assertEquals("Red and Green tonemap must match at point $i", ptR.y, ptG.y, 0.0001f)
+            assertEquals("Red and Blue tonemap must match at point $i", ptR.y, ptB.y, 0.0001f)
+
+            // Transfer curve MUST be monotonically non-decreasing (no dips or kinks in highlight shoulder)
+            assertTrue("Curve must be monotonic at point $i: ${ptR.y} >= $prevY", ptR.y >= prevY - 0.0001f)
+            prevY = ptR.y
+        }
+
+        // Peak white strictly reaches 1.0 (no dingy gray clamping)
+        val peakPoint = curve.getPoint(TonemapCurve.CHANNEL_RED, count - 1)
+        assertEquals(1.0f, peakPoint.y, 0.001f)
+
+        // Inky black strictly at 0.0
+        val blackPoint = curve.getPoint(TonemapCurve.CHANNEL_RED, 0)
+        assertEquals(0.0f, blackPoint.y, 0.0001f)
+    }
+
+    @Test
+    fun testRec2020PreviewColorMatrixNeutralWhitePreservation() {
+        val params = Rec2020AutoToneParams(
+            exposure = 0.15f,
+            highlights = 0.75f,
+            shadows = 0.50f,
+            contrast = 0.05f,
+            fadeout = 0.60f
+        )
+        val matrix = Rec2020AutoToneEngine.computePreviewColorMatrix(params)
+        val arr = matrix.array
+
+        // Row 0: Red output, Row 1: Green output, Row 2: Blue output
+        val row0Sum = arr[0] + arr[1] + arr[2]
+        val row1Sum = arr[5] + arr[6] + arr[7]
+        val row2Sum = arr[10] + arr[11] + arr[12]
+
+        // Rows must sum to identical luminance scale (neutral white preservation, zero color shift on white clouds)
+        assertEquals("Row 0 and Row 1 luminance weight sum must match", row0Sum, row1Sum, 0.001f)
+        assertEquals("Row 0 and Row 2 luminance weight sum must match", row0Sum, row2Sum, 0.001f)
+
+        // Offsets on Red, Green, Blue channels must be strictly identical (zero DC color tint)
+        val offR = arr[4]
+        val offG = arr[9]
+        val offB = arr[14]
+        assertEquals("Channel offsets must be identical across R, G, B", offR, offG, 0.001f)
+        assertEquals("Channel offsets must be identical across R, G, B", offR, offB, 0.001f)
+    }
+
+    @Test
     fun testExposureControlsInCinemaPipeline() {
         val baseConfig = CinemaConfig(
             colorProfile = CinemaColorProfile.REC_709,

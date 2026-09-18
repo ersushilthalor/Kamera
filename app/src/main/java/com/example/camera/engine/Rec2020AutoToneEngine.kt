@@ -22,22 +22,22 @@ private const val TAG = "Rec2020AutoTone"
  * Real-time continuous Auto Tone Control Engine exclusively for REC.2020 Log Profile.
  *
  * Automatically and continuously adapts:
- * - Exposure (maintains optimal scene & subject midtone illumination)
- * - Highlights (smooth roll-off shoulder protecting bright sky & specular highlights without darkening foreground)
- * - Shadows (intelligent toe lift for dark areas & foliage while keeping inky blacks at zero)
- * - Contrast (scene-aware adaptive latitude curve)
+ * - Exposure (maintains optimal scene & subject midtone illumination; NEVER darkens scene just to save sky)
+ * - Highlights (smooth C1-continuous roll-off shoulder protecting bright sky & specular highlights without red/pink artifacts)
+ * - Shadows (intelligent toe lift for dark areas & foliage while keeping inky blacks strictly at zero)
+ * - Contrast (scene-aware adaptive latitude curve centered around 18% middle gray)
  * - Fadeout (dynamic black pedestal pinning & midtone tonal separation)
  *
  * Adheres strictly to the user's priority:
- * Priority: perfect overall scene exposure → subject/foreground detail → natural shadows/midtones → highlight protection → sky protection.
- * Smooth frame-to-frame temporal adaptation prevents flickering, pumping, or sudden stepping.
+ * Priority: overall scene/subject exposure → shadow detail → natural midtones/color → highlight control → sky protection.
+ * Smooth frame-to-frame temporal adaptation with hysteresis prevents flickering, pumping, or sudden stepping.
  */
 data class Rec2020AutoToneParams(
-    val exposure: Float = 0.0f,     // -0.5f to +0.5f adaptive EV shift
-    val highlights: Float = 0.45f,  // 0.0f (natural) to 1.0f (maximum roll-off shoulder)
+    val exposure: Float = 0.0f,     // 0.0f to +0.35f adaptive EV shift (never darkens scene to save sky)
+    val highlights: Float = 0.45f,  // 0.0f (natural) to 1.0f (maximum smooth roll-off shoulder)
     val shadows: Float = 0.30f,     // 0.0f (deep) to 1.0f (lifted toe detail)
-    val contrast: Float = 0.0f,     // -0.5f to +0.5f dynamic range contrast
-    val fadeout: Float = 0.50f,     // 0.0f to 1.0f black depth pinning & clarity
+    val contrast: Float = 0.0f,     // -0.15f to +0.15f dynamic range contrast
+    val fadeout: Float = 0.55f,     // 0.0f to 1.0f inky black depth pinning & clarity
     val skyProtectionActive: Boolean = false,
     val subjectDetailBoost: Boolean = false,
     val sceneLuxIndex: Float = 0.5f
@@ -50,17 +50,28 @@ class Rec2020AutoToneEngine {
     val currentParams: StateFlow<Rec2020AutoToneParams> = _currentParams.asStateFlow()
 
     // Internal smoothed state for temporal IIR filtering (prevents pumping and flicker)
-    private var smoothedExposure = 0.0f
+    private var smoothedExposure = 0.06f
     private var smoothedHighlights = 0.45f
-    private var smoothedShadows = 0.30f
-    private var smoothedContrast = 0.0f
-    private var smoothedFadeout = 0.50f
-    private var smoothedLuxIndex = 0.5f
+    private var smoothedShadows = 0.32f
+    private var smoothedContrast = 0.02f
+    private var smoothedFadeout = 0.55f
+    private var smoothedEv100 = 11.5f
 
-    // Temporal smoothing coefficient: ~0.08f gives smooth 350-450ms cinematic transitions at 30fps
-    private val temporalAlpha = 0.085f
+    // Deadband hysteresis memory to prevent micro-fluctuations
+    private var lastTargetExposure = 0.06f
+    private var lastTargetHighlights = 0.45f
+    private var lastTargetShadows = 0.32f
+    private var lastTargetContrast = 0.02f
+    private var lastTargetFadeout = 0.55f
 
-    // Throttling for ISP TonemapCurve regeneration to keep Camera2 capture queue lightweight
+    // ISP update tracking to prevent capture queue congestion
+    private var lastIspExposure = 0.0f
+    private var lastIspHighlights = 0.0f
+    private var lastIspShadows = 0.0f
+    private var lastIspContrast = 0.0f
+    private var lastIspFadeout = 0.0f
+
+    // Throttling for ISP TonemapCurve regeneration
     private var lastCurveGeneratedTime = 0L
     private var cachedTonemapCurve: TonemapCurve? = null
     private var lastCurveExposure = 0.0f
@@ -74,80 +85,90 @@ class Rec2020AutoToneEngine {
      * highlight pressure (sky/windows), shadow depth, and detected subjects.
      */
     fun onFrameCaptured(result: TotalCaptureResult, characteristics: CameraCharacteristics?) {
-        val iso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
+        val iso = (result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100).coerceAtLeast(1)
         val expTimeNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 20_000_000L
+        val aperture = result.get(CaptureResult.LENS_APERTURE) ?: 1.8f
         val faces = result.get(CaptureResult.STATISTICS_FACES) ?: emptyArray()
 
-        // Calculate absolute sensor exposure index: ISO * exposureSeconds
-        val exposureSec = expTimeNs.toDouble() / 1_000_000_000.0
-        val sensorFlux = (iso.toDouble() * exposureSec).toFloat()
+        // Absolute scene exposure calculation via standard APEX EV100
+        val expSec = (expTimeNs.toDouble() / 1_000_000_000.0).coerceAtLeast(1e-6)
+        val ev100 = ((kotlin.math.ln((aperture * aperture) / expSec) / kotlin.math.ln(2.0)) -
+                (kotlin.math.ln(iso.toDouble() / 100.0) / kotlin.math.ln(2.0))).toFloat()
+
         val hasFace = faces.isNotEmpty()
         val maxFaceArea = if (hasFace) faces.maxOf { it.bounds.width() * it.bounds.height() } else 0
 
-        processSceneIllumination(sensorFlux, hasFace, maxFaceArea)
+        processSceneIllumination(ev100, hasFace, maxFaceArea)
     }
 
     /**
-     * Internal scene analysis logic factoring sensor flux, face presence, and user priorities.
+     * Internal scene analysis logic factoring sensor EV100, face presence, and user priorities.
      */
-    fun processSceneIllumination(sensorFlux: Float, hasFace: Boolean = false, maxFaceArea: Int = 0) {
-        // Normalize scene illumination index:
-        // sensorFlux < 0.02f -> very bright direct sun/sky
-        // sensorFlux in 0.02f..0.25f -> bright outdoor daylight
-        // sensorFlux in 0.25f..2.5f -> normal indoor / golden hour
-        // sensorFlux > 2.5f -> dim indoor / night
-        val targetLuxIndex = (sensorFlux / 2.0f).coerceIn(0.0f, 1.0f)
-        smoothedLuxIndex += (targetLuxIndex - smoothedLuxIndex) * temporalAlpha
+    fun processSceneIllumination(ev100: Float, hasFace: Boolean = false, maxFaceArea: Int = 0) {
+        // 1. Temporal Smoothing with Hysteresis on Scene EV100 (deadband = 0.12 EV)
+        val evDelta = kotlin.math.abs(ev100 - smoothedEv100)
+        if (evDelta >= 0.12f) {
+            val evAlpha = if (evDelta > 1.5f) 0.12f else 0.06f
+            smoothedEv100 += (ev100 - smoothedEv100) * evAlpha
+        }
 
-        // 1. SKY & HIGHLIGHT PRESSURE ESTIMATION
-        // In outdoor daylight conditions, skies are intense and demand smooth shoulder roll-off.
-        val outdoorDaylightFactor = ((0.30f - sensorFlux) / 0.28f).coerceIn(0.0f, 1.0f)
-        val hasSkyPressure = outdoorDaylightFactor > 0.15f
+        // Normalize outdoor daylight factor from EV100:
+        // EV <= 8.0: indoor / low-light
+        // EV 8.0..13.5: open shade / golden hour / overcast
+        // EV >= 13.5: bright sunny outdoor daylight with high sky dynamic range
+        val outdoorFactor = ((smoothedEv100 - 8.5f) / 5.5f).coerceIn(0.0f, 1.0f)
+        val hasSkyPressure = outdoorFactor > 0.20f
 
-        // 2. SUBJECT / FOREGROUND DETECTION
-        // If human faces or prominent foreground subjects are present, prioritize their midtones!
-        val subjectWeight = if (hasFace) {
-            (maxFaceArea.toFloat() / 200_000f).coerceIn(0.2f, 1.0f)
+        // Subject / Face weighting
+        val faceWeight = if (hasFace) {
+            (maxFaceArea.toFloat() / 200_000f).coerceIn(0.25f, 1.0f)
         } else {
             0.0f
         }
 
-        // 3. TARGET PARAMETERS COMPUTATION ACCORDING TO USER PRIORITY HIERARCHY:
-        // Priority 1: Perfect overall scene exposure (DO NOT darken whole scene just to save sky)
-        // Midtones stay locked at ~18% reference grey. If outdoor sky is intense, we only add a slight
-        // positive lift to midtones (+0.05..+0.12 EV) to ensure foreground subjects remain clear.
-        val targetExposure = if (hasFace) {
-            (0.08f * subjectWeight + outdoorDaylightFactor * 0.06f).coerceIn(-0.25f, 0.35f)
-        } else {
-            (outdoorDaylightFactor * 0.08f).coerceIn(-0.25f, 0.30f)
-        }
+        // 2. TARGET PARAMETERS COMPUTATION ACCORDING TO USER PRIORITY HIERARCHY:
+        // Priority 1: Overall scene/subject exposure (NEVER darken the whole scene just to save the sky!)
+        // Under bright outdoor sky, standard camera AE underexposes subjects to save clouds.
+        // We counteract this by lifting exposure (+0.06 to +0.22 EV) so subjects, skin, and foliage stay luminous.
+        var targetExposure = (0.04f + outdoorFactor * 0.14f + faceWeight * 0.10f).coerceIn(0.0f, 0.32f)
 
-        // Priority 2 & 3: Subject/foreground detail & natural shadows/midtones
-        // When sky pressure is high or dynamic range is wide, automatically lift shadow toe
-        // to reveal crisp texture in foliage, ground, and shadows without milky blacks.
-        val targetShadows = (0.22f + outdoorDaylightFactor * 0.40f + subjectWeight * 0.15f).coerceIn(0.15f, 0.75f)
+        // Priority 2: Shadow detail (reveals dark foliage, fabric, and textures without lifting inky blacks)
+        var targetShadows = (0.28f + outdoorFactor * 0.38f + faceWeight * 0.10f).coerceIn(0.20f, 0.75f)
 
-        // Priority 4 & 5: Highlight protection & sky protection (FIXED)
-        // Intelligently activate smooth shoulder roll-off compression. When bright sky is present,
-        // highlight roll-off increases so clouds and sky gradations compress cleanly toward 1.0,
-        // without hard clipping and WITHOUT darkening the foreground!
-        val targetHighlights = (0.28f + outdoorDaylightFactor * 0.62f).coerceIn(0.20f, 0.95f)
+        // Priority 3: Natural midtones & color depth & contrast
+        // In high-contrast harsh daylight, gently relax contrast (-0.08 to -0.02) to retain wide latitude.
+        // In flat indoor/overcast light, gently firm contrast (+0.06 to +0.12) for flagship punch and depth.
+        var targetContrast = (-0.08f * outdoorFactor + 0.10f * (1.0f - outdoorFactor)).coerceIn(-0.12f, 0.14f)
 
-        // Dynamic Range Contrast:
-        // In harsh outdoor daylight, slightly relax contrast (-0.12) to fit full dynamic range.
-        // In flatter lighting, gently firm contrast (+0.08) for rich flagship presence.
-        val targetContrast = (-outdoorDaylightFactor * 0.18f + (1.0f - outdoorDaylightFactor) * 0.08f).coerceIn(-0.25f, 0.15f)
+        // Fadeout / Inky Black Pedestal: strictly pins black floor to 0.0 and expands midtone dynamic separation
+        var targetFadeout = (0.52f + 0.16f * (1.0f - outdoorFactor)).coerceIn(0.48f, 0.70f)
 
-        // Fadeout / Washed-Out black depth recovery:
-        // Pin black floor to pure inky zero while expanding midtone dynamic range.
-        val targetFadeout = (0.42f + (1.0f - outdoorDaylightFactor) * 0.22f).coerceIn(0.35f, 0.70f)
+        // Priority 4 & 5: Highlight control & sky protection (C1-continuous smooth roll-off shoulder)
+        // Gently compresses clouds and specular highlights toward 1.0 without hard clipping or color tint
+        var targetHighlights = (0.35f + 0.50f * outdoorFactor).coerceIn(0.30f, 0.88f)
 
-        // 4. TEMPORAL FILTERING (Smooth frame-to-frame adaptation without flickering or pumping)
-        smoothedExposure += (targetExposure - smoothedExposure) * temporalAlpha
-        smoothedHighlights += (targetHighlights - smoothedHighlights) * temporalAlpha
-        smoothedShadows += (targetShadows - smoothedShadows) * temporalAlpha
-        smoothedContrast += (targetContrast - smoothedContrast) * temporalAlpha
-        smoothedFadeout += (targetFadeout - smoothedFadeout) * temporalAlpha
+        // 3. APPLY DEADBAND HYSTERESIS (prevents micro-flicker on steady frames)
+        targetExposure = applyDeadband(lastTargetExposure, targetExposure, 0.015f)
+        lastTargetExposure = targetExposure
+
+        targetHighlights = applyDeadband(lastTargetHighlights, targetHighlights, 0.02f)
+        lastTargetHighlights = targetHighlights
+
+        targetShadows = applyDeadband(lastTargetShadows, targetShadows, 0.02f)
+        lastTargetShadows = targetShadows
+
+        targetContrast = applyDeadband(lastTargetContrast, targetContrast, 0.015f)
+        lastTargetContrast = targetContrast
+
+        targetFadeout = applyDeadband(lastTargetFadeout, targetFadeout, 0.02f)
+        lastTargetFadeout = targetFadeout
+
+        // 4. TEMPORAL IIR FILTERING (Smooth cinematic transitions without pumping)
+        smoothedExposure = smoothParam(smoothedExposure, targetExposure)
+        smoothedHighlights = smoothParam(smoothedHighlights, targetHighlights)
+        smoothedShadows = smoothParam(smoothedShadows, targetShadows)
+        smoothedContrast = smoothParam(smoothedContrast, targetContrast)
+        smoothedFadeout = smoothParam(smoothedFadeout, targetFadeout)
 
         val newParams = Rec2020AutoToneParams(
             exposure = smoothedExposure,
@@ -157,25 +178,61 @@ class Rec2020AutoToneEngine {
             fadeout = smoothedFadeout,
             skyProtectionActive = hasSkyPressure,
             subjectDetailBoost = hasFace,
-            sceneLuxIndex = smoothedLuxIndex
+            sceneLuxIndex = outdoorFactor
         )
         _currentParams.value = newParams
+    }
+
+    private fun applyDeadband(current: Float, target: Float, deadband: Float): Float {
+        return if (kotlin.math.abs(target - current) < deadband) current else target
+    }
+
+    private fun smoothParam(current: Float, target: Float): Float {
+        val diff = target - current
+        if (kotlin.math.abs(diff) < 0.001f) return target
+        val alpha = if (kotlin.math.abs(diff) > 0.10f) 0.09f else 0.05f
+        return current + diff * alpha
+    }
+
+    /**
+     * Checks if smoothed parameters changed significantly since last ISP update.
+     * Prevents issuing redundant repeating capture requests when the scene is static.
+     */
+    fun hasSignificantChangeSinceLastIspUpdate(): Boolean {
+        val p = _currentParams.value
+        return kotlin.math.abs(p.exposure - lastIspExposure) > 0.015f ||
+               kotlin.math.abs(p.highlights - lastIspHighlights) > 0.02f ||
+               kotlin.math.abs(p.shadows - lastIspShadows) > 0.02f ||
+               kotlin.math.abs(p.contrast - lastIspContrast) > 0.015f ||
+               kotlin.math.abs(p.fadeout - lastIspFadeout) > 0.02f
+    }
+
+    fun markIspUpdated() {
+        val p = _currentParams.value
+        lastIspExposure = p.exposure
+        lastIspHighlights = p.highlights
+        lastIspShadows = p.shadows
+        lastIspContrast = p.contrast
+        lastIspFadeout = p.fadeout
     }
 
     /**
      * Evaluates the ITU-R BT.2020 transfer function with real-time scene-aware auto tone:
      * - Exposure scaling
      * - Inky black pedestal pinning (y(0) = 0 strictly guaranteed)
-     * - Intelligent shadow toe lift (x < 0.42)
-     * - Midtone contrast centering around 0.18
-     * - Smooth filmic highlight shoulder roll-off (x > 0.58) protecting skies & highlights
-     * - True 1.0 peak white preservation (NEVER clamps to dull gray)
+     * - Intelligent shadow toe lift (x in 0.001..0.38)
+     * - Midtone contrast centering around 18% middle gray (~0.46 in BT.2020 OETF)
+     * - Smooth C1-continuous filmic highlight shoulder roll-off (x > 0.62) protecting skies & highlights
+     * - True 1.0 peak white preservation (NEVER clamps to dull gray, strictly monotonic)
+     * - Preserves 100% neutral chromaticity across Red, Green, Blue (ZERO red/pink tint)
      */
     fun evaluateTransferFunction(x: Float, params: Rec2020AutoToneParams): Float {
         val inVal = x.coerceIn(0f, 1f)
+        if (inVal <= 0.0001f) return 0.0f
+        if (inVal >= 0.9999f) return 1.0f
 
-        // 1. Exposure shift along the characteristic response
-        val expScale = 2.0f.pow(params.exposure * 0.65f)
+        // 1. Exposure scaling along the logarithmic characteristic
+        val expScale = 2.0f.pow(params.exposure * 0.70f)
         val xShifted = (inVal * expScale).coerceIn(0f, 1f)
 
         // 2. Base ITU-R BT.2020 OETF transfer function
@@ -187,68 +244,64 @@ class Rec2020AutoToneEngine {
             alpha * xShifted.pow(0.45f) - (alpha - 1.0f)
         }
 
-        // 3. Pin black pedestal and recover rich midtone separation (Fadeout)
-        // In Rec.2020, black pedestal at x=0 must be pure inky black (y=0)
+        // 3. Inky Black Pedestal Pinning & Fadeout (strictly 0.0 at x=0, eliminates milky blacks)
         val fadeout = params.fadeout.coerceIn(0.0f, 1.0f)
-        val rawBlack = 0.0f // Rec.2020 naturally starts at 0
-        val targetNatural = if (xShifted < 0.018f) 4.5f * xShifted else (1.099f * xShifted.pow(0.45f) - 0.099f)
-        y = (y + (targetNatural - y) * (fadeout * 0.35f)).coerceIn(0f, 1f)
-
-        // 4. Contrast S-curve adjustment centered around middle gray 0.18
-        if (params.contrast != 0.0f) {
-            val factor = 1.0f + (params.contrast * 0.40f)
-            y = 0.18f + (y - 0.18f) * factor
+        if (xShifted < 0.06f) {
+            val t = 1.0f - (xShifted / 0.06f)
+            y *= (1.0f - t * t * (0.22f * fadeout))
         }
 
-        // 5. Intelligent Shadow Toe Lift (reveals shadow texture, leaves y=0 untouched)
-        // Active in dark region x < 0.42f
+        // 4. Intelligent Shadow Detail Recovery (smooth toe lift, zero at x=0 and midtones)
         val shadowLift = params.shadows.coerceIn(0f, 1f)
-        if (shadowLift > 0.0f && xShifted < 0.42f) {
-            val v = xShifted / 0.42f // 0.0 at black, 1.0 at midtone
-            // Quadratic toe shape that starts at 0 at x=0 and smoothly returns to 0 at x=0.42
-            val toeShape = 4.0f * v * (1.0f - v) // Peaks at v=0.5
-            y += shadowLift * 0.14f * toeShape
+        if (shadowLift > 0.0f && xShifted in 0.001f..0.38f) {
+            val v = xShifted / 0.38f // 0.0 at black, 1.0 at upper shadow
+            val toeShape = 4.0f * v * (1.0f - v) * (1.0f - v) // Peaks around v=0.33
+            y += shadowLift * 0.16f * toeShape
         }
 
-        // 6. Highlight Protection & Smooth Filmic Shoulder Roll-off (FIXED & UPGRADED)
-        // Smoothly compresses highlights above knee x_knee = 0.58 into a soft asymptotic shoulder.
-        // Guarantees:
-        // - Continuous with midtones at x_knee
-        // - y(1.0) is ALWAYS 1.0 (pure sparkling white, never dingy gray!)
-        // - Protects bright skies & clouds without darkening midtones or foreground subjects!
-        val knee = 0.58f
+        // 5. Midtone Micro-Contrast & Tonal Separation (centered around 18% middle gray)
+        if (params.contrast != 0.0f) {
+            val factor = 1.0f + (params.contrast * 0.42f)
+            val midPivot = 0.46f // ~18% scene reflectance in BT.2020 OETF
+            y = midPivot + (y - midPivot) * factor
+        }
+
+        // 6. Highlight Control & Sky Protection (FIXED: C1 smooth shoulder, zero red/pink artifacts)
+        // Seamlessly compresses highlights above knee into a smooth asymptotic shoulder.
+        val knee = 0.62f
         val highlightStrength = params.highlights.coerceIn(0f, 1f)
         if (xShifted > knee && highlightStrength > 0.0f) {
             val u = (xShifted - knee) / (1.0f - knee) // 0.0 at knee, 1.0 at peak
-            val yKnee = evaluateBaseRec2020(knee)
-            // Exponential compression factor: higher strength = earlier, softer shoulder roll-off
-            val kappa = 1.2f + highlightStrength * 3.2f
-            val shoulderWeight = (1.0f - exp(-kappa * u)) / (1.0f - exp(-kappa))
-            val rolledOffY = yKnee + (1.0f - yKnee) * shoulderWeight
-            // Blend between original curve and smooth roll-off shoulder
-            y = y * (1.0f - highlightStrength * 0.85f) + rolledOffY * (highlightStrength * 0.85f)
+            val yAtKnee = evaluateTransferFunctionAtKnee(knee, params)
+            val rollPower = 1.5f + highlightStrength * 1.8f
+            val shoulderY = yAtKnee + (1.0f - yAtKnee) * (1.0f - (1.0f - u).pow(rollPower))
+            val blendWeight = (highlightStrength * 0.78f) * u
+            y = y * (1.0f - blendWeight) + shoulderY * blendWeight
         }
 
-        // Strictly enforce 0.0 at x=0 and 1.0 at x=1
-        if (xShifted <= 0.0001f) y = 0.0f
-        if (xShifted >= 0.9999f) y = 1.0f
-
-        return y.coerceIn(0f, 1f)
+        // Strictly enforce boundaries: 0.0 at 0, 1.0 at 1
+        if (inVal <= 0.0001f) return 0.0f
+        if (inVal >= 0.9999f) return 1.0f
+        return y.coerceIn(0.0f, 1.0f)
     }
 
-    private fun evaluateBaseRec2020(x: Float): Float {
+    private fun evaluateTransferFunctionAtKnee(knee: Float, params: Rec2020AutoToneParams): Float {
+        val expScale = 2.0f.pow(params.exposure * 0.70f)
+        val xShifted = (knee * expScale).coerceIn(0f, 1f)
         val alpha = 1.09929682680944f
         val beta = 0.018053968510807f
-        return if (x < beta) {
-            4.5f * x
-        } else {
-            alpha * x.pow(0.45f) - (alpha - 1.0f)
-        }.coerceIn(0f, 1f)
+        var y = if (xShifted < beta) 4.5f * xShifted else alpha * xShifted.pow(0.45f) - (alpha - 1.0f)
+        if (params.contrast != 0.0f) {
+            val factor = 1.0f + (params.contrast * 0.42f)
+            val midPivot = 0.46f
+            y = midPivot + (y - midPivot) * factor
+        }
+        return y.coerceIn(0.0f, 1.0f)
     }
 
     /**
      * Generates a 64-point hardware TonemapCurve for Camera2 ISP programming.
-     * Throttled to avoid unnecessary garbage collection when scene is steady.
+     * All three channels (Red, Green, Blue) receive identical curves to strictly preserve neutral color balance.
      */
     fun getTonemapCurve(numPoints: Int = 64): TonemapCurve {
         val p = _currentParams.value
@@ -301,37 +354,63 @@ class Rec2020AutoToneEngine {
      * Exactly matches the hardware TonemapCurve response on the live viewfinder surface!
      */
     fun getPreviewColorMatrix(): ColorMatrix {
-        val p = _currentParams.value
+        return computePreviewColorMatrix(_currentParams.value)
+    }
 
-        // 1. Exposure scale
-        val expScale = 2.0f.pow(p.exposure * 0.65f)
+    companion object {
+        /**
+         * Computes a calibrated 4x5 ColorMatrix matching the REC.2020 Auto Tone parameters:
+         * - Neutral white conservation: Sum of row coefficients = 1.0 (strictly ZERO red/pink tint!)
+         * - Flagship natural color depth: Rich wide-gamut saturation (+14%)
+         * - Uniform R, G, B scaling and DC offset prevents highlight false colors.
+         */
+        fun computePreviewColorMatrix(p: Rec2020AutoToneParams): ColorMatrix {
+            val expScale = 2.0f.pow(p.exposure * 0.70f)
+            val contrastFactor = 1.0f + (p.contrast * 0.38f)
+            val fadeoutRecovery = p.fadeout * 0.25f
+            val effectiveContrast = contrastFactor + fadeoutRecovery
 
-        // 2. Dynamic contrast & black pedestal pinning (Fadeout)
-        val contrastFactor = 1.0f + (p.contrast * 0.35f)
-        val fadeoutRecovery = p.fadeout * 0.30f
-        val effectiveContrast = contrastFactor + fadeoutRecovery
+            // Pivot translation for 18% gray with deep inky black pinning
+            val blackOffset = -14f * p.fadeout
+            val pivotOffset = (1.0f - effectiveContrast) * 42f + blackOffset
+            val shadowLiftOffset = p.shadows * 14f
 
-        // Translation keeps 18% gray pivot while pinning blacks
-        val blackOffset = -18f * p.fadeout
-        val t = (1.0f - effectiveContrast) * 46f + blackOffset
+            // Highlight compression factor (preserves sparkling highlights without clipping)
+            val highlightComp = 1.0f - (p.highlights * 0.10f)
 
-        // 3. Shadow lift component in preview matrix
-        val shadowLiftOffset = p.shadows * 22f
+            // Scaled luminance factor
+            val lumScale = (expScale * effectiveContrast * highlightComp).coerceIn(0.6f, 1.8f)
 
-        // 4. Highlight roll-off compression in preview matrix
-        // Highlight protection gently rolls off the top knee (never dimming midtones)
-        val highlightCompression = 1.0f - (p.highlights * 0.14f)
+            // Total DC offset added to channels (strictly identical on all 3 channels)
+            val channelOffset = (pivotOffset + shadowLiftOffset).coerceIn(-30f, 30f)
 
-        val r = expScale * effectiveContrast * highlightCompression
-        val g = expScale * effectiveContrast * highlightCompression
-        val b = expScale * effectiveContrast * highlightCompression
-        val totalOffset = t + shadowLiftOffset
+            // Flagship Color Depth: Natural Wide-Gamut Saturation (+14%)
+            // Calibrated Rec.709/Rec.2020 luminance weights (sum of row coeffs = 1.0)
+            // Guarantees that any neutral pixel (R=G=B) yields identical R'=G'=B' with ZERO tint!
+            val sat = 1.14f
+            val invSat = 1.0f - sat
+            val lr = 0.2126f * invSat
+            val lg = 0.7152f * invSat
+            val lb = 0.0722f * invSat
 
-        return ColorMatrix(floatArrayOf(
-            r, 0f, 0f, 0f, totalOffset,
-            0f, g, 0f, 0f, totalOffset,
-            0f, 0f, b, 0f, totalOffset,
-            0f, 0f, 0f, 1f, 0f
-        ))
+            val m00 = (lr + sat) * lumScale
+            val m01 = lg * lumScale
+            val m02 = lb * lumScale
+
+            val m10 = lr * lumScale
+            val m11 = (lg + sat) * lumScale
+            val m12 = lb * lumScale
+
+            val m20 = lr * lumScale
+            val m21 = lg * lumScale
+            val m22 = (lb + sat) * lumScale
+
+            return ColorMatrix(floatArrayOf(
+                m00, m01, m02, 0f, channelOffset,
+                m10, m11, m12, 0f, channelOffset,
+                m20, m21, m22, 0f, channelOffset,
+                0f,  0f,  0f,  1f, 0f
+            ))
+        }
     }
 }

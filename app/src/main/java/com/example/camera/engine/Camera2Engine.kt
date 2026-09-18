@@ -1600,7 +1600,9 @@ class Camera2Engine(private val context: Context) {
     private fun onRec2020AutoToneFrame() {
         val now = System.currentTimeMillis()
         if (now - lastRec2020IspUpdateTime < 66L) return // 15fps throttle for repeating ISP tonemap updates
+        if (!cinemaEngine.rec2020AutoToneEngine.hasSignificantChangeSinceLastIspUpdate()) return
         lastRec2020IspUpdateTime = now
+        cinemaEngine.rec2020AutoToneEngine.markIspUpdated()
         val session = captureSession ?: return
         val builder = previewRequestBuilder ?: return
         try {

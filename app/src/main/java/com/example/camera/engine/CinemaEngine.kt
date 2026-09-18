@@ -267,20 +267,27 @@ class CinemaEngine(private val context: Context) {
 
             // 2. Hardware Color Space Matrix (Gamut Transfer + Saturation Scaling + Washed-Out Recovery + Baked LUT)
             if (supportsColorCorrection) {
-                val transform = generateColorSpaceTransform(
-                    config.colorSpace,
-                    config.colorProfile,
-                    config.saturation,
-                    lutForIsp,
-                    config.washedOut
-                )
-                if (supportsTransformMatrix) {
-                    builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
-                    builder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform)
-                    builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, generateColorGains(lutForIsp))
+                if (config.colorProfile == CinemaColorProfile.REC_2020) {
+                    // For REC.2020 Log Profile:
+                    // Maintain Camera2 ISP in High Quality Color Correction mode with factory-calibrated AWB gains.
+                    // This strictly prevents channel imbalance and false color / red / pink tint artifacts in bright highlights!
+                    builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_HIGH_QUALITY)
                 } else {
-                    builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_FAST)
-                    builder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform)
+                    val transform = generateColorSpaceTransform(
+                        config.colorSpace,
+                        config.colorProfile,
+                        config.saturation,
+                        lutForIsp,
+                        config.washedOut
+                    )
+                    if (supportsTransformMatrix) {
+                        builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
+                        builder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform)
+                        builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, generateColorGains(lutForIsp))
+                    } else {
+                        builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_FAST)
+                        builder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform)
+                    }
                 }
             }
         }
