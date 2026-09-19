@@ -4,12 +4,13 @@ import androidx.compose.ui.graphics.Color
 import com.squareup.moshi.JsonClass
 
 /**
- * Dedicated Hardware & Software Video Processing Pipelines for Video Mode.
+ * Dedicated Hardware & Software Video Processing Pipeline for Video Mode.
  *
  * NOT a simple filter or post-processing overlay:
- * When selected, the camera hardware ISP, tonemap curves, color space transforms,
- * edge sharpening, noise reduction, and video encoder profiles are dynamically
- * routed through a completely distinct image processing architecture.
+ * Capture-to-encoder computational video architecture:
+ * Dynamic S-curve tone mapping with aggressive highlight roll-off,
+ * anti-magenta highlight reconstruction, multi-frame temporal HDR integration,
+ * motion-aware temporal noise reduction, and broadcast-grade encoding.
  */
 @JsonClass(generateAdapter = false)
 enum class VideoPipelineType(
@@ -20,31 +21,13 @@ enum class VideoPipelineType(
     val description: String,
     val accentColor: Color
 ) {
-    IPHONE(
-        id = "iphone",
-        displayName = "iPhone Pipeline",
-        badgeLabel = "iPhone",
-        subtitle = "Warm Natural & Smooth Roll-Off",
-        description = "Apple-inspired processing: subtle ambient warmth, natural skin tone protection, low-to-moderate contrast with wide dynamic range, smooth highlight roll-off, controlled sharpening without digital halos, and natural tonal transitions.",
-        accentColor = Color(0xFFFFCA28)
-    ),
-
-    DSLR(
-        id = "dslr",
-        displayName = "DSLR Pipeline",
-        badgeLabel = "DSLR",
-        subtitle = "Neutral Studio & Photographic Depth",
-        description = "Natural camera/DSLR-inspired processing: strict neutral studio color science, deep inky shadows with fine textural detail, filmic logarithmic-linear knee, zero artificial edge haloing, and organic optical depth.",
-        accentColor = Color(0xFFEF5350)
-    ),
-
-    SAMSUNG(
-        id = "samsung",
-        displayName = "Samsung Pipeline",
-        badgeLabel = "Samsung",
-        subtitle = "Dynamic HDR & Vivid Clarity",
-        description = "Modern Samsung computational video: multi-band HDR dynamic range compression, punchy S-curve contrast, rich and vivid foliage and sky color separation, deep shadow recovery, and crisp micro-edge definition.",
-        accentColor = Color(0xFF2979FF)
+    HDR(
+        id = "hdr",
+        displayName = "HDR Pipeline",
+        badgeLabel = "HDR",
+        subtitle = "DSLR Computational HDR",
+        description = "Computational DSLR-style HDR video pipeline: aggressive highlight protection, anti-magenta recovery, multi-frame temporal denoise, deep inky shadows, and broadcast-grade encoding.",
+        accentColor = Color(0xFFFFB300)
     ),
 
     OFF(
@@ -52,15 +35,18 @@ enum class VideoPipelineType(
         displayName = "Standard Android",
         badgeLabel = "Standard",
         subtitle = "Default Sensor ISP",
-        description = "Default standard Android camera HAL video pipeline without specialized ISP routing.",
+        description = "Default standard Android camera HAL video pipeline without specialized computational ISP routing.",
         accentColor = Color(0xFF9E9E9E)
     );
 
     companion object {
-        val SELECTABLE_PIPELINES = listOf(IPHONE, DSLR, SAMSUNG)
+        val SELECTABLE_PIPELINES = listOf(HDR)
 
         fun fromId(id: String): VideoPipelineType {
-            return entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: IPHONE
+            return when (id.lowercase()) {
+                "off" -> OFF
+                else -> HDR // Maps "hdr", "dslr", "iphone", "samsung" seamlessly to HDR
+            }
         }
     }
 }

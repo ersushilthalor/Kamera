@@ -134,7 +134,7 @@ fun TopControlBar(
     onToggleMegapixelMode: () -> Unit = {},
     onDollyZoomClick: () -> Unit = {},
     isVideoPipelineEnabled: Boolean = true,
-    activeVideoPipeline: com.example.camera.pipeline.video.VideoPipelineType = com.example.camera.pipeline.video.VideoPipelineType.IPHONE,
+    activeVideoPipeline: com.example.camera.pipeline.video.VideoPipelineType = com.example.camera.pipeline.video.VideoPipelineType.HDR,
     onVideoPipelineClick: () -> Unit = {},
     onVideoPipelineLongClick: () -> Unit = {},
     onFlashClick: () -> Unit,

@@ -259,6 +259,7 @@ class Camera2Engine(private val context: Context) {
     val zoomProgress: StateFlow<Float> = _zoomProgress.asStateFlow()
 
     init {
+        videoPipelineEngine.attachHdrEngine(videoHdrEngine)
         videoPipelineEngine.setPipeline(preferences.getActiveVideoPipeline())
         videoPipelineEngine.setEnabled(preferences.isVideoPipelineEnabled)
         videoHdrEngine.onStateChangedListener = { state ->
@@ -1593,7 +1594,35 @@ class Camera2Engine(private val context: Context) {
                 cinemaEngine.rec2020AutoToneEngine.onFrameCaptured(result, chars)
                 onRec2020AutoToneFrame()
             }
+
+            // Real-time Computational HDR Video Pipeline processing (5 Hz quality-update cycles + 30/60 FPS smooth interpolation)
+            if (currentMode == CameraMode.VIDEO && videoPipelineEngine.isEnabled.value &&
+                videoPipelineEngine.activePipelineType.value == com.example.camera.pipeline.video.VideoPipelineType.HDR) {
+                val shouldUpdateIsp = videoHdrEngine.onFrameCaptured(result)
+                if (shouldUpdateIsp) {
+                    onVideoHdrIspUpdate()
+                }
+            }
         }
+    }
+
+    private var lastVideoHdrIspUpdateTime = 0L
+    private fun onVideoHdrIspUpdate() {
+        val now = System.currentTimeMillis()
+        if (now - lastVideoHdrIspUpdateTime < 150L) return // Max ~6-7 updates per second for hardware ISP bus
+        if (!videoHdrEngine.hasSignificantChangeSinceLastIspUpdate()) return
+        lastVideoHdrIspUpdateTime = now
+        videoHdrEngine.markIspUpdated()
+        val session = captureSession ?: return
+        val builder = previewRequestBuilder ?: return
+        try {
+            videoPipelineEngine.applyToCaptureRequest(
+                builder = builder,
+                capabilities = capabilities.value,
+                currentIso = videoHdrEngine.currentState.currentIso
+            )
+            session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
+        } catch (ignored: Exception) {}
     }
 
     private var lastRec2020IspUpdateTime = 0L
@@ -3495,7 +3524,9 @@ class Camera2Engine(private val context: Context) {
                 _selectedVideoResolution.value ?: CameraResolution(1920, 1080)
             }
             val cinemaCodec = if (isCinema) cinemaConfig.value.codec else CinemaCodec.H264
-            val isHdrVideoActive = (currentMode == CameraMode.VIDEO && videoHdrEngine.mode != VideoHdrMode.OFF)
+            val isHdrVideoActive = (currentMode == CameraMode.VIDEO &&
+                    ((videoPipelineEngine.isEnabled.value && videoPipelineEngine.activePipelineType.value == com.example.camera.pipeline.video.VideoPipelineType.HDR) ||
+                            videoHdrEngine.mode != VideoHdrMode.OFF))
             val is10BitRequested = (isCinema && (cinemaConfig.value.logBitDepth == LogBitDepth.BIT_10 || cinemaCodec == CinemaCodec.PRORES)) ||
                     (isHdrVideoActive && cinemaCapabilities.value.supports10BitRecording)
             val baseBitrate = if (isCinema) {

@@ -32,6 +32,7 @@ fun VideoPipelineBottomSheet(
 ) {
     val isEnabled by viewModel.isVideoPipelineEnabled.collectAsState()
     val activePipeline by viewModel.activeVideoPipeline.collectAsState()
+    val videoHdrState by viewModel.videoHdrState.collectAsState()
 
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
@@ -60,7 +61,7 @@ fun VideoPipelineBottomSheet(
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "Video Processing Pipeline",
+                            text = "HDR Video Pipeline",
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White,
@@ -75,7 +76,7 @@ fun VideoPipelineBottomSheet(
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = "REAL ISP",
+                                text = "DSLR HDR",
                                 color = activePipeline.accentColor,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Black,
@@ -84,7 +85,7 @@ fun VideoPipelineBottomSheet(
                         }
                     }
                     Text(
-                        text = "Hardware ISP capture → tone mapping → color matrix → encoding",
+                        text = "Computational capture → ISP S-curve → temporal denoise → encoder",
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = Color.White.copy(alpha = 0.6f),
                             fontSize = 11.5.sp
@@ -106,7 +107,7 @@ fun VideoPipelineBottomSheet(
             AnimatedVisibility(visible = isEnabled) {
                 Column {
                     Text(
-                        text = "SELECT VIDEO PIPELINE",
+                        text = "ACTIVE COMPUTATIONAL PIPELINE",
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 1.sp,
@@ -115,110 +116,161 @@ fun VideoPipelineBottomSheet(
                         modifier = Modifier.padding(bottom = 8.dp, top = 4.dp)
                     )
 
-                    // 3 Selectable Pipeline Cards
-                    VideoPipelineType.SELECTABLE_PIPELINES.forEach { pipeline ->
-                        val isSelected = pipeline == activePipeline
-                        val cardBg = if (isSelected) Color(0xFF1E232E) else Color(0xFF181A22)
-                        val borderColor = if (isSelected) pipeline.accentColor else Color.White.copy(alpha = 0.10f)
+                    // Single HDR Pipeline Card
+                    val pipeline = VideoPipelineType.HDR
+                    val isSelected = isEnabled && activePipeline == VideoPipelineType.HDR
+                    val cardBg = if (isSelected) Color(0xFF1E232E) else Color(0xFF181A22)
+                    val borderColor = if (isSelected) pipeline.accentColor else Color.White.copy(alpha = 0.10f)
 
-                        Card(
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .border(if (isSelected) 1.5.dp else 1.dp, borderColor, RoundedCornerShape(14.dp))
+                            .clickable { viewModel.selectVideoPipeline(pipeline) }
+                            .testTag("video_pipeline_card_${pipeline.id}"),
+                        colors = CardDefaults.cardColors(containerColor = cardBg)
+                    ) {
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 4.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .border(if (isSelected) 1.5.dp else 1.dp, borderColor, RoundedCornerShape(14.dp))
-                                .clickable { viewModel.selectVideoPipeline(pipeline) }
-                                .testTag("video_pipeline_card_${pipeline.id}"),
-                            colors = CardDefaults.cardColors(containerColor = cardBg)
+                                .padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
+                            Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(14.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(pipeline.accentColor.copy(alpha = 0.25f)),
+                                contentAlignment = Alignment.Center
                             ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.CameraAlt,
+                                    contentDescription = null,
+                                    tint = pipeline.accentColor,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = pipeline.displayName,
+                                        style = MaterialTheme.typography.titleSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "· ${pipeline.subtitle}",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            color = pipeline.accentColor,
+                                            fontSize = 11.5.sp
+                                        ),
+                                        maxLines = 1
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = pipeline.description,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        color = Color.White.copy(alpha = 0.7f),
+                                        fontSize = 11.sp,
+                                        lineHeight = 15.sp
+                                    )
+                                )
+                            }
+
+                            if (isSelected) {
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Box(
                                     modifier = Modifier
-                                        .size(40.dp)
+                                        .size(24.dp)
                                         .clip(CircleShape)
-                                        .background(if (isSelected) pipeline.accentColor.copy(alpha = 0.25f) else Color(0xFF262832)),
+                                        .background(pipeline.accentColor),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
-                                        imageVector = when (pipeline) {
-                                            VideoPipelineType.IPHONE -> Icons.Outlined.PhoneIphone
-                                            VideoPipelineType.DSLR -> Icons.Outlined.CameraAlt
-                                            VideoPipelineType.SAMSUNG -> Icons.Outlined.AutoAwesome
-                                            else -> Icons.Outlined.Videocam
-                                        },
-                                        contentDescription = null,
-                                        tint = if (isSelected) pipeline.accentColor else Color.White.copy(alpha = 0.7f),
-                                        modifier = Modifier.size(22.dp)
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        tint = Color.Black,
+                                        modifier = Modifier.size(16.dp)
                                     )
                                 }
+                            }
+                        }
+                    }
 
-                                Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = pipeline.displayName,
-                                            style = MaterialTheme.typography.titleSmall.copy(
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.9f)
-                                            )
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = "· ${pipeline.subtitle}",
-                                            style = MaterialTheme.typography.bodySmall.copy(
-                                                color = if (isSelected) pipeline.accentColor else Color.White.copy(alpha = 0.5f),
-                                                fontSize = 11.5.sp
-                                            ),
-                                            maxLines = 1
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = pipeline.description,
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            color = Color.White.copy(alpha = 0.6f),
-                                            fontSize = 11.sp,
-                                            lineHeight = 15.sp
-                                        )
+                    // Real-Time Computational Status Bar
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF191B24),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "COMPUTATIONAL HDR TELEMETRY",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 1.sp,
+                                        color = pipeline.accentColor
                                     )
-                                }
+                                )
+                                Text(
+                                    text = "5 Hz Update Cycle",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = Color.White.copy(alpha = 0.5f),
+                                        fontSize = 10.sp
+                                    )
+                                )
+                            }
 
-                                if (isSelected) {
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .size(24.dp)
-                                            .clip(CircleShape)
-                                            .background(pipeline.accentColor),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = "Selected",
-                                            tint = Color.Black,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                TelemetryChip(
+                                    label = "Anti-Magenta",
+                                    value = "Protected",
+                                    color = Color(0xFF00E676)
+                                )
+                                TelemetryChip(
+                                    label = "Temporal Denoise",
+                                    value = if (videoHdrState.isMotionDetected) "Fast Motion" else "Multi-Frame SNR",
+                                    color = Color(0xFF29B6F6)
+                                )
+                                TelemetryChip(
+                                    label = "Shadow Lift",
+                                    value = "+${(videoHdrState.shadowLift * 100).toInt()}%",
+                                    color = Color(0xFFFFCA28)
+                                )
+                                TelemetryChip(
+                                    label = "Photometric EV",
+                                    value = String.format("%.1f", videoHdrState.estimatedEv),
+                                    color = Color(0xFFFF80AB)
+                                )
                             }
                         }
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Active Pipeline Technical Specifications Breakdown
-                    val characteristics = when (activePipeline) {
-                        VideoPipelineType.IPHONE -> IPhoneVideoPipeline().getCharacteristics()
-                        VideoPipelineType.DSLR -> DslrVideoPipeline().getCharacteristics()
-                        VideoPipelineType.SAMSUNG -> SamsungVideoPipeline().getCharacteristics()
-                        else -> IPhoneVideoPipeline().getCharacteristics()
-                    }
+                    // Pipeline Technical Specifications Breakdown
+                    val characteristics = HdrVideoPipeline().getCharacteristics()
 
                     Text(
                         text = "PIPELINE ARCHITECTURE SPECIFICATIONS",
@@ -279,7 +331,7 @@ fun VideoPipelineBottomSheet(
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = "Standard Android camera HAL pipeline active. Enable the master switch to route video frames through the iPhone, DSLR, or Samsung hardware ISP processing engines.",
+                            text = "Standard Android camera HAL pipeline active. Enable master switch to activate computational DSLR-style HDR video processing with anti-magenta highlight protection and multi-frame temporal denoise.",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = Color.White.copy(alpha = 0.7f),
                                 fontSize = 12.sp,
@@ -290,6 +342,27 @@ fun VideoPipelineBottomSheet(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TelemetryChip(label: String, value: String, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontWeight = FontWeight.Bold,
+                color = color,
+                fontSize = 12.sp
+            )
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall.copy(
+                color = Color.White.copy(alpha = 0.5f),
+                fontSize = 9.5.sp
+            )
+        )
     }
 }
 

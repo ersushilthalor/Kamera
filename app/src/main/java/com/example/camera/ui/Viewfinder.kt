@@ -78,7 +78,7 @@ fun Viewfinder(
     cinemaConfig: CinemaConfig? = null,
     rec2020AutoToneParams: com.example.camera.engine.Rec2020AutoToneParams? = null,
     isVideoPipelineEnabled: Boolean = true,
-    activeVideoPipeline: com.example.camera.pipeline.video.VideoPipelineType = com.example.camera.pipeline.video.VideoPipelineType.IPHONE,
+    activeVideoPipeline: com.example.camera.pipeline.video.VideoPipelineType = com.example.camera.pipeline.video.VideoPipelineType.HDR,
     onSurfaceTextureAvailable: (SurfaceTexture?) -> Unit,
     onTapToFocus: (Offset, Float, Float) -> Unit,
     onZoomChange: (Float) -> Unit,
@@ -297,16 +297,9 @@ fun Viewfinder(
                                 }
                             }
                         } else if (cameraMode == CameraMode.VIDEO && isVideoPipelineEnabled && activeVideoPipeline != com.example.camera.pipeline.video.VideoPipelineType.OFF) {
-                            val pipelineMat = when (activeVideoPipeline) {
-                                com.example.camera.pipeline.video.VideoPipelineType.IPHONE -> com.example.camera.pipeline.video.IPhoneVideoPipeline().getPreviewColorMatrix()
-                                com.example.camera.pipeline.video.VideoPipelineType.DSLR -> com.example.camera.pipeline.video.DslrVideoPipeline().getPreviewColorMatrix()
-                                com.example.camera.pipeline.video.VideoPipelineType.SAMSUNG -> com.example.camera.pipeline.video.SamsungVideoPipeline().getPreviewColorMatrix()
-                                else -> null
-                            }
-                            if (pipelineMat != null) {
-                                colorMatrix.postConcat(pipelineMat)
-                                hasFilter = true
-                            }
+                            val pipelineMat = com.example.camera.pipeline.video.HdrVideoPipeline().getPreviewColorMatrix()
+                            colorMatrix.postConcat(pipelineMat)
+                            hasFilter = true
                         } else if (cameraMode == CameraMode.PHOTO && activePhotoFilter != null && activePhotoFilter != PhotoFilter.ORIGINAL) {
                             val filterMat = activePhotoFilter.toAndroidColorMatrix()
                             if (filterMat != null) {

@@ -301,4 +301,115 @@ class ExampleUnitTest {
 
         engine.release()
     }
+
+    @Test
+    fun testHdrVideoPipelineArchitectureSinglePreset() {
+        // Video mode must only have 1 single selectable pipeline: HDR
+        assertEquals(1, com.example.camera.pipeline.video.VideoPipelineType.SELECTABLE_PIPELINES.size)
+        assertEquals(com.example.camera.pipeline.video.VideoPipelineType.HDR, com.example.camera.pipeline.video.VideoPipelineType.SELECTABLE_PIPELINES[0])
+
+        // Any old pipeline ID should gracefully resolve to HDR
+        assertEquals(com.example.camera.pipeline.video.VideoPipelineType.HDR, com.example.camera.pipeline.video.VideoPipelineType.fromId("iphone"))
+        assertEquals(com.example.camera.pipeline.video.VideoPipelineType.HDR, com.example.camera.pipeline.video.VideoPipelineType.fromId("samsung"))
+        assertEquals(com.example.camera.pipeline.video.VideoPipelineType.HDR, com.example.camera.pipeline.video.VideoPipelineType.fromId("dslr"))
+        assertEquals(com.example.camera.pipeline.video.VideoPipelineType.HDR, com.example.camera.pipeline.video.VideoPipelineType.fromId("hdr"))
+
+        val pipeline = com.example.camera.pipeline.video.HdrVideoPipeline()
+        assertEquals("HDR Pipeline", pipeline.name)
+        val chars = pipeline.getCharacteristics()
+        assertTrue(chars.highlightShadow.contains("anti-magenta", ignoreCase = true))
+        assertTrue(chars.dynamicRange.contains("temporal", ignoreCase = true))
+
+        // High-bitrate 10-bit HDR encoding verification
+        val bitrate4k = pipeline.getEncoderBitrate(3840, 2160, 40_000_000)
+        assertTrue(bitrate4k >= 65_000_000)
+    }
+
+    @Test
+    fun testHdrAntiMagentaHighlightReconstruction() {
+        val engine = com.example.camera.engine.VideoHdrEngine()
+        // Feed bright daylight scene with highlight clipping risk
+        for (i in 0 until 10) {
+            engine.processFrameValues(
+                iso = 100,
+                exposureNs = 2_000_000L,
+                aperture = 2.8f,
+                focusDist = 10.0f
+            )
+        }
+
+        val tonemapCurve = engine.getHdrTonemapCurve()
+        assertNotNull(tonemapCurve)
+
+        // Verify Anti-Magenta Highlight Reconstruction:
+        // As input x approaches 1.0f (knee region x >= 0.85),
+        // red and blue channels must converge towards green (desaturate highlights into pure neutral white)
+        // rather than allowing red/blue to blow out ahead of green and cause magenta tints.
+        val rOutNearClip: Float = tonemapCurve.getPoint(0, 55).y // Red near clipping (x = 55/63 = 0.873)
+        val gOutNearClip: Float = tonemapCurve.getPoint(1, 55).y // Green near clipping
+        val bOutNearClip: Float = tonemapCurve.getPoint(2, 55).y // Blue near clipping
+
+        val rMax: Float = tonemapCurve.getPoint(0, 63).y // Red at full clip (x = 1.0)
+        val gMax: Float = tonemapCurve.getPoint(1, 63).y // Green at full clip
+        val bMax: Float = tonemapCurve.getPoint(2, 63).y // Blue at full clip
+
+        // Full clipping point must strictly converge to 1.0f neutral white
+        assertEquals(1.0f, rMax, 0.001f)
+        assertEquals(1.0f, gMax, 0.001f)
+        assertEquals(1.0f, bMax, 0.001f)
+
+        // Near-clip: red and blue must not significantly exceed green (which causes pink/magenta tint)
+        val redGreenDiff: Float = rOutNearClip - gOutNearClip
+        val blueGreenDiff: Float = bOutNearClip - gOutNearClip
+        assertTrue(redGreenDiff <= 0.05f)
+        assertTrue(blueGreenDiff <= 0.05f)
+
+        // Monotonicity check: output must be non-decreasing
+        for (channel in 0..2) {
+            var lastY = -1.0f
+            for (i in 0 until 64) {
+                val pt = tonemapCurve.getPoint(channel, i)
+                val currentY: Float = pt.y
+                assertTrue(currentY >= lastY - 0.001f)
+                assertTrue(currentY in 0.0f..1.0f)
+                lastY = currentY
+            }
+        }
+    }
+
+    @Test
+    fun testHdrTemporalMotionAdaptationAndShadowRecovery() {
+        val engine = com.example.camera.engine.VideoHdrEngine()
+
+        // 1. Static Scene: same focus, exposure, and ISO -> motionFactor is low
+        for (i in 0 until 6) {
+            engine.processFrameValues(
+                iso = 400,
+                exposureNs = 16_666_666L,
+                aperture = 1.8f,
+                focusDist = 2.0f
+            )
+        }
+        assertFalse(engine.currentState.isMotionDetected)
+
+        // Deep black level baseline (x=0) must remain at 0.0f for inky blacks
+        val tonemapCurve = engine.getHdrTonemapCurve()
+        assertEquals(0.0f, tonemapCurve.getPoint(0, 0).y, 0.0001f)
+        assertEquals(0.0f, tonemapCurve.getPoint(1, 0).y, 0.0001f)
+        assertEquals(0.0f, tonemapCurve.getPoint(2, 0).y, 0.0001f)
+
+        // Shadow region (x = 8/63 = 0.127) must be lifted compared to linear
+        val shadowY: Float = tonemapCurve.getPoint(1, 8).y
+        val linearY = 8f / 63f
+        assertTrue(shadowY >= linearY)
+
+        // 2. Rapid Motion: sharp shift in focus distance and exposure time
+        engine.processFrameValues(
+            iso = 1200,
+            exposureNs = 33_333_333L,
+            aperture = 1.8f,
+            focusDist = 0.5f // Large focus step -> triggers motion detection
+        )
+        assertTrue(engine.currentState.isMotionDetected)
+    }
 }

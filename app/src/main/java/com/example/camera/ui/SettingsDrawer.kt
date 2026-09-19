@@ -167,7 +167,7 @@ fun SettingsDrawer(
     onOpenBeforeAfter: () -> Unit = {},
     // Custom Video Processing Pipeline
     isVideoPipelineEnabled: Boolean = true,
-    activeVideoPipeline: com.example.camera.pipeline.video.VideoPipelineType = com.example.camera.pipeline.video.VideoPipelineType.IPHONE,
+    activeVideoPipeline: com.example.camera.pipeline.video.VideoPipelineType = com.example.camera.pipeline.video.VideoPipelineType.HDR,
     onVideoPipelineToggle: (Boolean) -> Unit = {},
     onSelectVideoPipeline: (com.example.camera.pipeline.video.VideoPipelineType) -> Unit = {},
     onOpenVideoPipelineSheet: () -> Unit = {},

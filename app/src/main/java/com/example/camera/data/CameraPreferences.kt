@@ -1082,8 +1082,8 @@ class CameraPreferences(context: Context) {
         set(value) = prefs.edit().putBoolean("pref_video_pipeline_enabled", value).apply()
 
     var activeVideoPipelineId: String
-        get() = prefs.getString("pref_active_video_pipeline_id", com.example.camera.pipeline.video.VideoPipelineType.IPHONE.id)
-            ?: com.example.camera.pipeline.video.VideoPipelineType.IPHONE.id
+        get() = prefs.getString("pref_active_video_pipeline_id", com.example.camera.pipeline.video.VideoPipelineType.HDR.id)
+            ?: com.example.camera.pipeline.video.VideoPipelineType.HDR.id
         set(value) = prefs.edit().putString("pref_active_video_pipeline_id", value).apply()
 
     fun getActiveVideoPipeline(): com.example.camera.pipeline.video.VideoPipelineType {

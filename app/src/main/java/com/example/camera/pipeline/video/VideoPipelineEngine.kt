@@ -3,6 +3,7 @@ package com.example.camera.pipeline.video
 import android.graphics.ColorMatrix
 import android.hardware.camera2.CaptureRequest
 import android.util.Log
+import com.example.camera.engine.VideoHdrEngine
 import com.example.camera.model.HardwareCapabilities
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -11,27 +12,36 @@ import kotlinx.coroutines.flow.asStateFlow
 private const val TAG = "VideoPipelineEngine"
 
 /**
- * Coordinates video processing pipelines and routes camera frames dynamically
- * through the active pipeline from capture → ISP processing → viewfinder → video encoder.
+ * Coordinates the computational HDR video processing pipeline and routes camera frames dynamically
+ * through capture → ISP processing → viewfinder → video encoder.
+ *
+ * Exclusively provides the unified computational DSLR-Style HDR pipeline,
+ * eliminating the old legacy simulated pipelines.
  */
-class VideoPipelineEngine {
+class VideoPipelineEngine(
+    private var hdrEngine: VideoHdrEngine? = null
+) {
 
-    val iphonePipeline = IPhoneVideoPipeline()
-    val dslrPipeline = DslrVideoPipeline()
-    val samsungPipeline = SamsungVideoPipeline()
+    var hdrPipeline = HdrVideoPipeline(hdrEngine)
+        private set
 
-    private val _activePipelineType = MutableStateFlow(VideoPipelineType.IPHONE)
+    private val _activePipelineType = MutableStateFlow(VideoPipelineType.HDR)
     val activePipelineType: StateFlow<VideoPipelineType> = _activePipelineType.asStateFlow()
 
     private val _isEnabled = MutableStateFlow(true)
     val isEnabled: StateFlow<Boolean> = _isEnabled.asStateFlow()
 
+    fun attachHdrEngine(engine: VideoHdrEngine) {
+        hdrEngine = engine
+        hdrPipeline = HdrVideoPipeline(engine)
+    }
+
     fun getActivePipeline(): VideoPipeline {
-        return when (_activePipelineType.value) {
-            VideoPipelineType.IPHONE -> iphonePipeline
-            VideoPipelineType.DSLR -> dslrPipeline
-            VideoPipelineType.SAMSUNG -> samsungPipeline
-            VideoPipelineType.OFF -> iphonePipeline // Fallback
+        return if (_activePipelineType.value == VideoPipelineType.OFF) {
+            // Revert fallback
+            hdrPipeline
+        } else {
+            hdrPipeline
         }
     }
 
