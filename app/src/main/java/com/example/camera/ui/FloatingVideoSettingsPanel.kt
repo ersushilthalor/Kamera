@@ -39,11 +39,9 @@ fun FloatingVideoSettingsPanel(
     currentResolution: CameraResolution?,
     currentFps: Int,
     isUltraStabilizationEnabled: Boolean = false,
-    isHdrVideoActive: Boolean = false,
     onResolutionSelected: (CameraResolution) -> Unit,
     onFpsSelected: (Int) -> Unit,
     onUltraStabilizationToggle: () -> Unit = {},
-    onHdrVideoToggle: () -> Unit = {},
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -245,60 +243,6 @@ fun FloatingVideoSettingsPanel(
                                 Text(
                                     text = label,
                                     color = if (isSelected) Color(0xFFFFD54F) else Color.White,
-                                    fontSize = 13.sp,
-                                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Dedicated HDR Video Processing Row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column {
-                        Text(
-                            text = "HDR Video",
-                            color = Color.White.copy(alpha = 0.90f),
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = if (isHdrVideoActive) "Dedicated 10-bit / Multi-frame path" else "Standard Dynamic Range (SDR)",
-                            color = if (isHdrVideoActive) Color(0xFF64FFDA) else Color.White.copy(alpha = 0.50f),
-                            fontSize = 10.5.sp
-                        )
-                    }
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        listOf("SDR" to false, "HDR 10b" to true).forEach { (label, enabled) ->
-                            val isSelected = isHdrVideoActive == enabled
-
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (isSelected) (if (enabled) Color(0xFF003830) else Color(0xFF26210A)) else Color.Transparent)
-                                    .border(
-                                        width = if (isSelected) 1.dp else 0.dp,
-                                        color = if (isSelected) (if (enabled) Color(0xFF64FFDA) else Color(0xFFFFD54F)) else Color.Transparent,
-                                        shape = RoundedCornerShape(12.dp)
-                                    )
-                                    .clickable { if (isHdrVideoActive != enabled) onHdrVideoToggle() }
-                                    .padding(horizontal = 10.dp, vertical = 5.dp)
-                                    .testTag("hdr_video_toggle_$label"),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = label,
-                                    color = if (isSelected) (if (enabled) Color(0xFF64FFDA) else Color(0xFFFFD54F)) else Color.White,
                                     fontSize = 13.sp,
                                     fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
                                     maxLines = 1,

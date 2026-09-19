@@ -165,12 +165,6 @@ fun SettingsDrawer(
     onSelectPipelinePreset: (com.example.camera.pipeline.model.PipelinePreset) -> Unit = {},
     onOpenPipelineStudio: () -> Unit = {},
     onOpenBeforeAfter: () -> Unit = {},
-    // Custom Video Processing Pipeline
-    isVideoPipelineEnabled: Boolean = true,
-    activeVideoPipeline: com.example.camera.pipeline.video.VideoPipelineType = com.example.camera.pipeline.video.VideoPipelineType.HDR,
-    onVideoPipelineToggle: (Boolean) -> Unit = {},
-    onSelectVideoPipeline: (com.example.camera.pipeline.video.VideoPipelineType) -> Unit = {},
-    onOpenVideoPipelineSheet: () -> Unit = {},
     // Motorola Instant Camera Switching
     instantSwitchState: MotorolaInstantSwitchState = MotorolaInstantSwitchState(),
     onKeepUltraWideReadyToggle: (Boolean) -> Unit = {},
@@ -475,53 +469,6 @@ fun SettingsDrawer(
                                     subtitle = "Side-by-side split screen of sensor RAW vs processed output",
                                     actionLabel = "View",
                                     onClick = onOpenBeforeAfter
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // Video Processing Pipeline
-                        SamsungSectionHeader("VIDEO PROCESSING PIPELINES")
-                        SamsungCard {
-                            // Master Toggle
-                            SamsungSwitchItem(
-                                icon = Icons.Outlined.Videocam,
-                                title = "Hardware Video Pipeline",
-                                subtitle = "Capture → ISP tone mapping → color matrix → video encoder",
-                                checked = isVideoPipelineEnabled,
-                                onCheckedChange = onVideoPipelineToggle
-                            )
-
-                            if (isVideoPipelineEnabled) {
-                                SamsungDivider()
-
-                                // Active Pipeline Selector (iPhone / DSLR / Samsung)
-                                SamsungRowItem(
-                                    icon = Icons.Outlined.Palette,
-                                    title = "Active Pipeline",
-                                    subtitle = "${activeVideoPipeline.displayName} · ${activeVideoPipeline.subtitle}"
-                                ) {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        com.example.camera.pipeline.video.VideoPipelineType.SELECTABLE_PIPELINES.forEach { pipeline ->
-                                            SamsungSmallChip(
-                                                label = pipeline.badgeLabel,
-                                                isSelected = activeVideoPipeline == pipeline,
-                                                onClick = { onSelectVideoPipeline(pipeline) }
-                                            )
-                                        }
-                                    }
-                                }
-
-                                SamsungDivider()
-
-                                // Configure Pipeline Sheet Action
-                                SamsungActionItem(
-                                    icon = Icons.Outlined.Tune,
-                                    title = "Configure & Technical Specs",
-                                    subtitle = "View tone curves, dynamic range, color matrices & encoding",
-                                    actionLabel = "Specs",
-                                    onClick = onOpenVideoPipelineSheet
                                 )
                             }
                         }

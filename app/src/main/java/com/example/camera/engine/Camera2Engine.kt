@@ -176,8 +176,6 @@ class Camera2Engine(private val context: Context) {
     private val cinemaSoftwareRecorder by lazy { CinemaSoftwareRecordingEngine(context) }
     private var isSoftwareCinemaRecording: Boolean = false
     private var isRawVideoRecording: Boolean = false
-    private var isHdrVideoRecording: Boolean = false
-    private var rawVideoImageReader: android.media.ImageReader? = null
 
     private val _previewBufferSize = MutableStateFlow<Size?>(null)
     val previewBufferSize: StateFlow<Size?> = _previewBufferSize.asStateFlow()
@@ -231,23 +229,10 @@ class Camera2Engine(private val context: Context) {
     private var restartPending = false
     private var zoomDebounceJob: Job? = null
 
-    val videoHdrEngine = VideoHdrEngine()
-    private val _videoHdrState = MutableStateFlow(videoHdrEngine.currentState)
-    val videoHdrState: StateFlow<VideoHdrState> = _videoHdrState.asStateFlow()
-
-    val hdrVideoRecordingEngine = HdrVideoRecordingEngine(context)
+    val rawVideoPreviewRenderer = RawVideoPreviewRenderer()
+    val rawPreviewBitmap: StateFlow<Bitmap?> = rawVideoPreviewRenderer.rawPreviewBitmap
     val rawVideoRecordingEngine = RawVideoRecordingEngine(context)
-    val hdrHardwareProfile: StateFlow<HdrHardwareProfile> = hdrVideoRecordingEngine.hardwareProfile
-    private val _isHdrVideoActive = MutableStateFlow(false)
-    val isHdrVideoActive: StateFlow<Boolean> = _isHdrVideoActive.asStateFlow()
-    fun setHdrVideoActive(active: Boolean) { _isHdrVideoActive.value = active }
     val rawVideoTelemetry: StateFlow<RawVideoTelemetry> = rawVideoRecordingEngine.telemetry
-
-    val videoPipelineEngine = com.example.camera.pipeline.video.VideoPipelineEngine()
-    private val _activeVideoPipeline = MutableStateFlow(preferences.getActiveVideoPipeline())
-    val activeVideoPipeline: StateFlow<com.example.camera.pipeline.video.VideoPipelineType> = _activeVideoPipeline.asStateFlow()
-    private val _isVideoPipelineEnabled = MutableStateFlow(preferences.isVideoPipelineEnabled)
-    val isVideoPipelineEnabled: StateFlow<Boolean> = _isVideoPipelineEnabled.asStateFlow()
 
     val cinemaEngine = CinemaEngine(context)
     private val _cinemaConfig = MutableStateFlow(cinemaEngine.config)
@@ -270,12 +255,6 @@ class Camera2Engine(private val context: Context) {
     val zoomProgress: StateFlow<Float> = _zoomProgress.asStateFlow()
 
     init {
-        videoPipelineEngine.attachHdrEngine(videoHdrEngine)
-        videoPipelineEngine.setPipeline(preferences.getActiveVideoPipeline())
-        videoPipelineEngine.setEnabled(preferences.isVideoPipelineEnabled)
-        videoHdrEngine.onStateChangedListener = { state ->
-            _videoHdrState.value = state
-        }
         // ZERO hardware calls during construction/init!
         // Background threads, camera detection, and initialization are performed lazily
         // via safeInitializeCamera() only after CAMERA permission is confirmed.
@@ -697,7 +676,6 @@ class Camera2Engine(private val context: Context) {
     fun inspectCapabilities(cameraId: String) {
         try {
             val chars = getCharacteristics(cameraId) ?: return
-            videoHdrEngine.onCameraConfigured(chars)
             val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
 
             val caps = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
@@ -993,6 +971,11 @@ class Camera2Engine(private val context: Context) {
         val wasPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
         val isPhotoOrPortrait = (mode == CameraMode.PHOTO || mode == CameraMode.PORTRAIT)
         val wasMore = (currentMode == CameraMode.MORE)
+        val wasRawVideo = (currentMode == CameraMode.RAW_VIDEO)
+        val isRawVideo = (mode == CameraMode.RAW_VIDEO)
+        if (wasRawVideo && !isRawVideo) {
+            rawVideoPreviewRenderer.clear()
+        }
         if (_isRecordingVideo.value) {
             stopVideoRecording()
         }
@@ -1010,6 +993,7 @@ class Camera2Engine(private val context: Context) {
 
         val needsReconfigure = (wasPhotoOrPortrait != isPhotoOrPortrait) ||
                 (wasMore && isPhotoOrPortrait) ||
+                (wasRawVideo != isRawVideo) ||
                 (captureSession == null) ||
                 (!_isCameraReady.value)
 
@@ -1342,7 +1326,7 @@ class Camera2Engine(private val context: Context) {
             Log.e(TAG, "Failed to create uncompressed YUV ImageReader for Custom Pipeline", t)
         }
 
-        if (caps.supportsRaw && isRawCaptureEnabled && caps.supportedRawResolutions.isNotEmpty()) {
+        if (caps.supportsRaw && (isRawCaptureEnabled || currentMode == CameraMode.RAW_VIDEO) && caps.supportedRawResolutions.isNotEmpty()) {
             val rawRes = caps.supportedRawResolutions.first()
             try {
                 imageReaderRaw = ImageReader.newInstance(
@@ -1410,6 +1394,29 @@ class Camera2Engine(private val context: Context) {
         }
 
         val activeLens = _selectedLens.value
+
+        if (currentMode == CameraMode.RAW_VIDEO) {
+            val lensId = activeLens?.cameraId ?: "0"
+            val chars = getCharacteristics(lensId)
+            imageReaderRaw?.setOnImageAvailableListener({ reader ->
+                try {
+                    val img = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+                    try {
+                        if (currentMode == CameraMode.RAW_VIDEO) {
+                            rawVideoPreviewRenderer.renderRawBayerToPreview(img, chars)
+                            if (_isRecordingVideo.value && isRawVideoRecording) {
+                                rawVideoRecordingEngine.onRawImageAvailable(img, lastCaptureResult)
+                            }
+                        }
+                    } finally {
+                        img.close()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "RAW video frame callback error", e)
+                }
+            }, backgroundHandler)
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
             activeLens?.physicalCameraId != null &&
             activeLens.physicalCameraId != activeLens.cameraId) {
@@ -1438,6 +1445,9 @@ class Camera2Engine(private val context: Context) {
                 val template = CameraDevice.TEMPLATE_PREVIEW
                 previewRequestBuilder = camera.createCaptureRequest(template).apply {
                     addTarget(previewSurf)
+                    if (currentMode == CameraMode.RAW_VIDEO) {
+                        imageReaderRaw?.surface?.let { addTarget(it) }
+                    }
                     applyCommonSettings(this)
                 }
 
@@ -1489,6 +1499,9 @@ class Camera2Engine(private val context: Context) {
 
             previewRequestBuilder = camera.createCaptureRequest(template).apply {
                 addTarget(previewSurf)
+                if (currentMode == CameraMode.RAW_VIDEO) {
+                    imageReaderRaw?.surface?.let { addTarget(it) }
+                }
                 applyCommonSettings(this)
             }
 
@@ -1605,35 +1618,7 @@ class Camera2Engine(private val context: Context) {
                 cinemaEngine.rec2020AutoToneEngine.onFrameCaptured(result, chars)
                 onRec2020AutoToneFrame()
             }
-
-            // Real-time Computational HDR Video Pipeline processing (5 Hz quality-update cycles + 30/60 FPS smooth interpolation)
-            if (currentMode == CameraMode.VIDEO && videoPipelineEngine.isEnabled.value &&
-                videoPipelineEngine.activePipelineType.value == com.example.camera.pipeline.video.VideoPipelineType.HDR) {
-                val shouldUpdateIsp = videoHdrEngine.onFrameCaptured(result)
-                if (shouldUpdateIsp) {
-                    onVideoHdrIspUpdate()
-                }
-            }
         }
-    }
-
-    private var lastVideoHdrIspUpdateTime = 0L
-    private fun onVideoHdrIspUpdate() {
-        val now = System.currentTimeMillis()
-        if (now - lastVideoHdrIspUpdateTime < 150L) return // Max ~6-7 updates per second for hardware ISP bus
-        if (!videoHdrEngine.hasSignificantChangeSinceLastIspUpdate()) return
-        lastVideoHdrIspUpdateTime = now
-        videoHdrEngine.markIspUpdated()
-        val session = captureSession ?: return
-        val builder = previewRequestBuilder ?: return
-        try {
-            videoPipelineEngine.applyToCaptureRequest(
-                builder = builder,
-                capabilities = capabilities.value,
-                currentIso = videoHdrEngine.currentState.currentIso
-            )
-            session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
-        } catch (ignored: Exception) {}
     }
 
     private var lastRec2020IspUpdateTime = 0L
@@ -1919,16 +1904,6 @@ class Camera2Engine(private val context: Context) {
             cinemaEngine.applyToCaptureRequest(builder)
         }
 
-        // Dedicated Real Hardware Video Processing Pipeline (iPhone / DSLR / Samsung)
-        if (currentMode == CameraMode.VIDEO && videoPipelineEngine.isEnabled.value) {
-            val currentIsoVal = manualIso ?: 100
-            videoPipelineEngine.applyToCaptureRequest(
-                builder = builder,
-                capabilities = caps,
-                currentIso = currentIsoVal
-            )
-        }
-
         // Digital Zoom / Crop Region
         applyZoom(builder)
     }
@@ -1990,108 +1965,6 @@ class Camera2Engine(private val context: Context) {
             session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to update preview settings", e)
-        }
-    }
-
-    /**
-     * Change Video HDR Mode (OFF / AUTO / MANUAL)
-     */
-    fun setVideoHdrMode(mode: VideoHdrMode) {
-        videoHdrEngine.mode = mode
-        _videoHdrState.value = videoHdrEngine.currentState
-        if (currentMode == CameraMode.VIDEO) {
-            updatePreviewSettings()
-        }
-    }
-
-    /**
-     * Change Video HDR Manual Intensity (0 to 100)
-     */
-    fun setVideoHdrManualIntensity(intensity: Int) {
-        videoHdrEngine.manualIntensity = intensity
-        _videoHdrState.value = videoHdrEngine.currentState
-        if (currentMode == CameraMode.VIDEO) {
-            updatePreviewSettings()
-        }
-    }
-
-    fun setVideoHdrManualShadows(value: Int) {
-        videoHdrEngine.manualShadows = value
-        _videoHdrState.value = videoHdrEngine.currentState
-        if (currentMode == CameraMode.VIDEO) {
-            updatePreviewSettings()
-        }
-    }
-
-    fun setVideoHdrManualHighlights(value: Int) {
-        videoHdrEngine.manualHighlights = value
-        _videoHdrState.value = videoHdrEngine.currentState
-        if (currentMode == CameraMode.VIDEO) {
-            updatePreviewSettings()
-        }
-    }
-
-    fun setVideoHdrManualContrast(value: Int) {
-        videoHdrEngine.manualContrast = value
-        _videoHdrState.value = videoHdrEngine.currentState
-        if (currentMode == CameraMode.VIDEO) {
-            updatePreviewSettings()
-        }
-    }
-
-    fun setVideoHdrManualExposure(value: Int) {
-        videoHdrEngine.manualExposure = value
-        _videoHdrState.value = videoHdrEngine.currentState
-        if (currentMode == CameraMode.VIDEO) {
-            updatePreviewSettings()
-        }
-    }
-
-    fun setVideoHdrManualBlackLevel(value: Int) {
-        videoHdrEngine.manualBlackLevel = value
-        _videoHdrState.value = videoHdrEngine.currentState
-        if (currentMode == CameraMode.VIDEO) {
-            updatePreviewSettings()
-        }
-    }
-
-    fun setVideoHdrManualMidtones(value: Int) {
-        videoHdrEngine.manualMidtones = value
-        _videoHdrState.value = videoHdrEngine.currentState
-        if (currentMode == CameraMode.VIDEO) {
-            updatePreviewSettings()
-        }
-    }
-
-    fun setVideoHdrManualSaturation(value: Int) {
-        videoHdrEngine.manualSaturation = value
-        _videoHdrState.value = videoHdrEngine.currentState
-        if (currentMode == CameraMode.VIDEO) {
-            updatePreviewSettings()
-        }
-    }
-
-    /**
-     * Switch Hardware Video Processing Pipeline (iPhone, DSLR, Samsung)
-     */
-    fun setVideoPipeline(pipeline: com.example.camera.pipeline.video.VideoPipelineType) {
-        _activeVideoPipeline.value = pipeline
-        videoPipelineEngine.setPipeline(pipeline)
-        preferences.saveActiveVideoPipeline(pipeline)
-        if (currentMode == CameraMode.VIDEO) {
-            updatePreviewSettings()
-        }
-    }
-
-    /**
-     * Enable/Disable Custom Video Processing Pipeline
-     */
-    fun setVideoPipelineEnabled(enabled: Boolean) {
-        _isVideoPipelineEnabled.value = enabled
-        videoPipelineEngine.setEnabled(enabled)
-        preferences.isVideoPipelineEnabled = enabled
-        if (currentMode == CameraMode.VIDEO) {
-            updatePreviewSettings()
         }
     }
 
@@ -3535,11 +3408,7 @@ class Camera2Engine(private val context: Context) {
                 _selectedVideoResolution.value ?: CameraResolution(1920, 1080)
             }
             val cinemaCodec = if (isCinema) cinemaConfig.value.codec else CinemaCodec.H264
-            val isHdrVideoActive = (currentMode == CameraMode.VIDEO &&
-                    ((videoPipelineEngine.isEnabled.value && videoPipelineEngine.activePipelineType.value == com.example.camera.pipeline.video.VideoPipelineType.HDR) ||
-                            videoHdrEngine.mode != VideoHdrMode.OFF))
-            val is10BitRequested = (isCinema && (cinemaConfig.value.logBitDepth == LogBitDepth.BIT_10 || cinemaCodec == CinemaCodec.PRORES)) ||
-                    (isHdrVideoActive && cinemaCapabilities.value.supports10BitRecording)
+            val is10BitRequested = isCinema && (cinemaConfig.value.logBitDepth == LogBitDepth.BIT_10 || cinemaCodec == CinemaCodec.PRORES)
             val baseBitrate = if (isCinema) {
                 when {
                     cinemaCodec == CinemaCodec.PRORES -> {
@@ -3568,11 +3437,7 @@ class Camera2Engine(private val context: Context) {
                     else -> 10_000_000
                 }
             }
-            val bitrate = if (currentMode == CameraMode.VIDEO && videoPipelineEngine.isEnabled.value) {
-                videoPipelineEngine.getEncoderBitrate(videoRes.width, videoRes.height, baseBitrate)
-            } else {
-                baseBitrate
-            }
+            val bitrate = baseBitrate
             val targetFps = if (isCinema) cinemaConfig.value.videoFps else videoFps
             val isSoftwareCinema = isCinema && (cinemaCodec == CinemaCodec.PRORES || cinemaCodec == CinemaCodec.VP9)
 
@@ -3590,14 +3455,12 @@ class Camera2Engine(private val context: Context) {
             recordingDir.mkdirs()
 
             val isRawVideo = (currentMode == CameraMode.RAW_VIDEO)
-            val isDedicatedHdr = (currentMode == CameraMode.VIDEO && _isHdrVideoActive.value)
 
             if (isRawVideo) {
                 val characteristics = getCharacteristics(lens.cameraId)
                 val (supported, reason) = rawVideoRecordingEngine.checkHardwareSupport(characteristics)
                 if (!supported) {
                     onError(reason ?: "Sensor RAW capture not supported on this camera")
-                    restartCamera()
                     return
                 }
 
@@ -3616,151 +3479,19 @@ class Camera2Engine(private val context: Context) {
 
                 val rawStarted = rawVideoRecordingEngine.startRecording(
                     destFile = tempFile,
-                    width = videoRes.width,
-                    height = videoRes.height,
+                    width = imageReaderRaw?.width ?: videoRes.width,
+                    height = imageReaderRaw?.height ?: videoRes.height,
                     fps = targetFps,
                     characteristics = characteristics
                 )
                 if (!rawStarted) {
                     onError("Failed to initialize RAW bayer stream")
-                    restartCamera()
                     return
                 }
 
                 isRawVideoRecording = true
-                val map = characteristics?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                val rawSizes = map?.getOutputSizes(ImageFormat.RAW_SENSOR)
-                val rawSize = rawSizes?.maxByOrNull { it.width * it.height }
-                    ?: Size(videoRes.width, videoRes.height)
-
-                val imageReader = android.media.ImageReader.newInstance(
-                    rawSize.width,
-                    rawSize.height,
-                    ImageFormat.RAW_SENSOR,
-                    5
-                )
-                rawVideoImageReader = imageReader
-
-                imageReader.setOnImageAvailableListener({ reader ->
-                    try {
-                        val img = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-                        try {
-                            rawVideoRecordingEngine.onRawImageAvailable(img, lastCaptureResult)
-                        } finally {
-                            img.close()
-                        }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "RAW image reader exception", e)
-                    }
-                }, backgroundHandler)
-
-                val previewSurf = previewSurface ?: return
-                val recorderSurface = imageReader.surface
-                activeRecordingSurface = recorderSurface
-
-                previewRequestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
-                    addTarget(previewSurf)
-                    addTarget(recorderSurface)
-                    applyCommonSettings(this)
-                }
-
-                createRecordingCaptureSession(
-                    camera = camera,
-                    previewSurface = previewSurf,
-                    recorderSurface = recorderSurface,
-                    is10Bit = false,
-                    callback = object : CameraCaptureSession.StateCallback() {
-                        override fun onConfigured(session: CameraCaptureSession) {
-                            captureSession = session
-                            try {
-                                session.setRepeatingRequest(
-                                    previewRequestBuilder!!.build(),
-                                    captureCallback,
-                                    backgroundHandler
-                                )
-                                startVideoTimer()
-                                _isRecordingVideo.value = true
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Failed to start RAW video recording session", e)
-                                onError(e.message ?: "Failed to start RAW recording")
-                                stopVideoRecording()
-                            }
-                        }
-
-                        override fun onConfigureFailed(session: CameraCaptureSession) {
-                            onError("Failed to configure RAW Video camera session")
-                            restartCamera()
-                        }
-                    }
-                )
-                return
-            }
-
-            if (isDedicatedHdr) {
-                isHdrVideoRecording = true
-                val characteristics = getCharacteristics(lens.cameraId)
-                val profile = hdrVideoRecordingEngine.detectHdrCapabilities(characteristics)
-
-                val prefix = "HDR_VID_"
-                val extension = "mp4"
-                val mimeType = "video/mp4"
-                val fileName = "${prefix}$timeStamp.$extension"
-                currentVideoFileName = fileName
-                currentVideoMimeType = mimeType
-
-                val tempFile = File(recordingDir, "hdr_temp_${System.currentTimeMillis()}.$extension").apply {
-                    if (exists()) delete()
-                    createNewFile()
-                }
-                currentRecordingTempFile = tempFile
-
-                val hdrSurface = hdrVideoRecordingEngine.startRecording(
-                    destFile = tempFile,
-                    width = videoRes.width,
-                    height = videoRes.height,
-                    fps = targetFps,
-                    bitrate = (bitrate * 1.3f).toInt(),
-                    isAudioEnabled = isAudioEnabled,
-                    hardwareProfile = profile
-                )
-                activeRecordingSurface = hdrSurface
-                val previewSurf = previewSurface ?: return
-
-                previewRequestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
-                    addTarget(previewSurf)
-                    addTarget(hdrSurface)
-                    applyCommonSettings(this)
-                }
-
-                createRecordingCaptureSession(
-                    camera = camera,
-                    previewSurface = previewSurf,
-                    recorderSurface = hdrSurface,
-                    is10Bit = profile.bitDepth == 10,
-                    callback = object : CameraCaptureSession.StateCallback() {
-                        override fun onConfigured(session: CameraCaptureSession) {
-                            captureSession = session
-                            try {
-                                session.setRepeatingRequest(
-                                    previewRequestBuilder!!.build(),
-                                    captureCallback,
-                                    backgroundHandler
-                                )
-                                startVideoTimer()
-                                _isRecordingVideo.value = true
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Failed to start HDR recording session", e)
-                                onError(e.message ?: "Failed to start HDR recording")
-                                stopVideoRecording()
-                            }
-                        }
-
-                        override fun onConfigureFailed(session: CameraCaptureSession) {
-                            onError("Failed to configure HDR Video camera session")
-                            restartCamera()
-                        }
-                    }
-                )
+                startVideoTimer()
+                _isRecordingVideo.value = true
                 return
             }
 
@@ -4060,7 +3791,7 @@ class Camera2Engine(private val context: Context) {
      */
     fun stopVideoRecording() {
         activeRecordingSurface = null
-        if (!_isRecordingVideo.value && !isSoftwareCinemaRecording && !isRawVideoRecording && !isHdrVideoRecording) return
+        if (!_isRecordingVideo.value && !isSoftwareCinemaRecording && !isRawVideoRecording) return
 
         try {
             val isCinema = (currentMode == CameraMode.CINEMA)
@@ -4075,8 +3806,6 @@ class Camera2Engine(private val context: Context) {
                 _isRecordingVideo.value = false
                 val recordedFile = rawVideoRecordingEngine.stopRecording()
                 currentRecordingTempFile = null
-                rawVideoImageReader?.close()
-                rawVideoImageReader = null
                 val activeLens = _selectedLens.value
                 val isFrontFacing = activeLens?.facing == CameraCharacteristics.LENS_FACING_FRONT
 
@@ -4108,48 +3837,6 @@ class Camera2Engine(private val context: Context) {
                         updateStorageStats()
                     }
                 }
-                restartCamera()
-                return
-            }
-
-            if (isHdrVideoRecording) {
-                isHdrVideoRecording = false
-                videoTimerJob?.cancel()
-                _isRecordingVideo.value = false
-                val recordedFile = hdrVideoRecordingEngine.stopRecording()
-                currentRecordingTempFile = null
-                val activeLens = _selectedLens.value
-                val isFrontFacing = activeLens?.facing == CameraCharacteristics.LENS_FACING_FRONT
-
-                engineScope.launch(Dispatchers.IO) {
-                    try {
-                        if (recordedFile != null && recordedFile.exists() && recordedFile.length() > 0) {
-                            val savedUri = saveVideoToGallery(
-                                tempFile = recordedFile,
-                                fileName = fileName,
-                                mimeType = mimeType,
-                                isCinema = false,
-                                isFrontFacing = isFrontFacing
-                            )
-                            if (savedUri != null) {
-                                _lastCapturedMedia.value = CapturedMedia(
-                                    uri = savedUri,
-                                    isVideo = true,
-                                    timestamp = System.currentTimeMillis(),
-                                    displayName = "HDR 10-bit Video",
-                                    isFrontCamera = isFrontFacing
-                                )
-                                Log.i(TAG, "HDR video successfully saved to Gallery: size=${recordedFile.length()} bytes, uri=$savedUri")
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save HDR video to gallery", e)
-                    } finally {
-                        try { recordedFile?.delete() } catch (ignored: Exception) {}
-                        updateStorageStats()
-                    }
-                }
-                restartCamera()
                 return
             }
 

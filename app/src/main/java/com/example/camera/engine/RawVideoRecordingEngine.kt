@@ -42,7 +42,12 @@ data class RawVideoTelemetry(
     val rawFormatLabel: String = "RAW_SENSOR (Bayer CFA)",
     val resolutionLabel: String = "1920x1080",
     val bayerPatternLabel: String = "RGGB"
-)
+) {
+    val formattedFps: String
+        get() = if (isRecording && currentDataRateMbPerSec > 0f) "LIVE" else "ACTIVE"
+    val formattedBitrate: String
+        get() = if (currentDataRateMbPerSec > 0f) String.format(java.util.Locale.US, "%.1f MB/s", currentDataRateMbPerSec) else bayerPatternLabel
+}
 
 /**
  * Real Sensor RAW Video Recording Engine.

@@ -39,7 +39,6 @@ fun MoreModesDrawer(
     onSelectDollyZoom: () -> Unit = {},
     onSelectAiSubjectTracking: () -> Unit = {},
     onSelectRawVideo: () -> Unit = {},
-    onSelectHdrVideo: () -> Unit = {},
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -175,27 +174,14 @@ fun MoreModesDrawer(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                Row(
+                MoreModeCard(
+                    icon = Icons.Outlined.Videocam,
+                    title = "RAW Video",
+                    subtitle = "Direct sensor Bayer 16-bit stream • Bypass ISP",
+                    tag = "mode_card_raw_video",
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    MoreModeCard(
-                        icon = Icons.Outlined.Videocam,
-                        title = "RAW Video",
-                        subtitle = "Native Bayer 16b direct stream",
-                        tag = "mode_card_raw_video",
-                        modifier = Modifier.weight(1f),
-                        onClick = onSelectRawVideo
-                    )
-                    MoreModeCard(
-                        icon = Icons.Outlined.HdrOn,
-                        title = "HDR Video",
-                        subtitle = "Dedicated 10-bit / Multi-frame path",
-                        tag = "mode_card_hdr_video",
-                        modifier = Modifier.weight(1f),
-                        onClick = onSelectHdrVideo
-                    )
-                }
+                    onClick = onSelectRawVideo
+                )
 
                 Spacer(modifier = Modifier.height(10.dp))
 

@@ -133,10 +133,6 @@ fun TopControlBar(
     onVideoSettingsClick: () -> Unit = {},
     onToggleMegapixelMode: () -> Unit = {},
     onDollyZoomClick: () -> Unit = {},
-    isVideoPipelineEnabled: Boolean = true,
-    activeVideoPipeline: com.example.camera.pipeline.video.VideoPipelineType = com.example.camera.pipeline.video.VideoPipelineType.HDR,
-    onVideoPipelineClick: () -> Unit = {},
-    onVideoPipelineLongClick: () -> Unit = {},
     onFlashClick: () -> Unit,
     onTimerClick: () -> Unit,
     onGridClick: () -> Unit,
@@ -650,43 +646,6 @@ fun TopControlBar(
             }
         }
 
-        val videoPipelineBadge = @Composable {
-            if (cameraMode == CameraMode.VIDEO && isVideoPipelineEnabled) {
-                Box(
-                    modifier = Modifier
-                        .height(34.dp)
-                        .clip(RoundedCornerShape(17.dp))
-                        .background(activeVideoPipeline.accentColor.copy(alpha = 0.2f))
-                        .border(1.dp, activeVideoPipeline.accentColor, RoundedCornerShape(17.dp))
-                        .clickable { onVideoPipelineClick() }
-                        .padding(horizontal = 10.dp)
-                        .testTag("video_pipeline_top_badge"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(activeVideoPipeline.accentColor)
-                        )
-                        Text(
-                            text = activeVideoPipeline.badgeLabel,
-                            color = activeVideoPipeline.accentColor,
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.5.sp,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
-                }
-            }
-        }
-
         val gridAssistButton = @Composable {
             IconButton(
                 onClick = onGridClick,
@@ -854,14 +813,12 @@ fun TopControlBar(
                 filterButton()
                 primaryBadge()
                 secondaryBadge()
-                videoPipelineBadge()
                 settingsButton()
             } else if (isVideoFamily) {
                 flashButton()
                 dollyZoomButton()
                 primaryBadge()
                 secondaryBadge()
-                videoPipelineBadge()
                 settingsButton()
             } else {
                 visibleItems.forEach { item ->

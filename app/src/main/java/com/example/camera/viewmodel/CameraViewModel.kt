@@ -11,7 +11,6 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.camera.data.CameraPreferences
 import com.example.camera.engine.Camera2Engine
-import com.example.camera.engine.HdrHardwareProfile
 import com.example.camera.engine.PortraitProcessor
 import com.example.camera.engine.RawVideoTelemetry
 import com.example.camera.model.*
@@ -138,13 +137,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val _isPortraitSettingsOpen = MutableStateFlow(false)
     val isPortraitSettingsOpen: StateFlow<Boolean> = _isPortraitSettingsOpen.asStateFlow()
 
-    // Video HDR State & Panel visibility
-    val videoHdrState: StateFlow<VideoHdrState> = engine.videoHdrState
-    val hdrHardwareProfile: StateFlow<HdrHardwareProfile> = engine.hdrHardwareProfile
-    val isHdrVideoActive: StateFlow<Boolean> = engine.isHdrVideoActive
+    // Sensor RAW Video State & Live Viewfinder Demosaic Stream
     val rawVideoTelemetry: StateFlow<RawVideoTelemetry> = engine.rawVideoTelemetry
-    private val _isVideoHdrPanelOpen = MutableStateFlow(false)
-    val isVideoHdrPanelOpen: StateFlow<Boolean> = _isVideoHdrPanelOpen.asStateFlow()
+    val rawPreviewBitmap: StateFlow<android.graphics.Bitmap?> = engine.rawPreviewBitmap
 
     // Cinema Mode State & Panel visibility
     val cinemaConfig: StateFlow<CinemaConfig> = engine.cinemaConfig
@@ -257,41 +252,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun updateCinemaConfig(config: CinemaConfig) {
         engine.setCinemaConfig(config)
         preferences.saveCinemaConfig(config)
-    }
-
-    // --- Custom Video Processing Pipeline (Hardware ISP Video Pipeline Switching) ---
-    private val _isVideoPipelineEnabled = MutableStateFlow(preferences.isVideoPipelineEnabled)
-    val isVideoPipelineEnabled: StateFlow<Boolean> = _isVideoPipelineEnabled.asStateFlow()
-
-    private val _activeVideoPipeline = MutableStateFlow(preferences.getActiveVideoPipeline())
-    val activeVideoPipeline: StateFlow<com.example.camera.pipeline.video.VideoPipelineType> = _activeVideoPipeline.asStateFlow()
-
-    private val _isVideoPipelineSheetOpen = MutableStateFlow(false)
-    val isVideoPipelineSheetOpen: StateFlow<Boolean> = _isVideoPipelineSheetOpen.asStateFlow()
-
-    fun toggleVideoPipelineEnabled(enabled: Boolean) {
-        _isVideoPipelineEnabled.value = enabled
-        preferences.isVideoPipelineEnabled = enabled
-        engine.setVideoPipelineEnabled(enabled)
-        showToast(if (enabled) "Video Pipeline: ON (${_activeVideoPipeline.value.displayName})" else "Video Pipeline: OFF (Standard)")
-    }
-
-    fun selectVideoPipeline(pipeline: com.example.camera.pipeline.video.VideoPipelineType) {
-        _activeVideoPipeline.value = pipeline
-        preferences.saveActiveVideoPipeline(pipeline)
-        engine.setVideoPipeline(pipeline)
-        showToast("Switched to ${pipeline.displayName}")
-    }
-
-    fun cycleNextVideoPipeline() {
-        val selectable = com.example.camera.pipeline.video.VideoPipelineType.SELECTABLE_PIPELINES
-        val currentIndex = selectable.indexOf(_activeVideoPipeline.value)
-        val nextIndex = if (currentIndex < 0 || currentIndex >= selectable.size - 1) 0 else currentIndex + 1
-        selectVideoPipeline(selectable[nextIndex])
-    }
-
-    fun setVideoPipelineSheetOpen(isOpen: Boolean) {
-        _isVideoPipelineSheetOpen.value = isOpen
     }
 
     // --- Custom Image Processing Pipeline (RAW/YUV Uncompressed Processing) ---
@@ -570,10 +530,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         engine.refocusFrameCount = preferences.getModeRefocusFrameCount(initialMode)
         engine.isHighQualityZoomEnabled = preferences.getModeHqZoomEnabled(initialMode)
         engine.zoomProcessingQuality = preferences.getModeZoomQuality(initialMode)
-        // Video HDR system initialization
-        val initHdr = preferences.videoHdrMode
-        engine.setVideoHdrMode(initHdr)
-        engine.setHdrVideoActive(initHdr != VideoHdrMode.OFF)
         engine.setMode(initialMode)
         engine.restoreInitialVideoResolution(CameraResolution(preferences.videoWidth, preferences.videoHeight))
         engine.setCinemaConfig(preferences.getCinemaConfig())
@@ -661,78 +617,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _saveSelfieAsPreviewed.value = enabled
         preferences.saveSelfieAsPreviewed = enabled
         engine.saveSelfieAsPreviewed = enabled
-    }
-
-    // Video HDR Controls
-    fun setVideoHdrMode(mode: VideoHdrMode) {
-        preferences.videoHdrMode = mode
-        engine.setVideoHdrMode(mode)
-        engine.setHdrVideoActive(mode != VideoHdrMode.OFF)
-        showToast("Video HDR: ${mode.label}")
-    }
-
-    fun toggleHdrVideo() {
-        val current = engine.isHdrVideoActive.value
-        val next = !current
-        val mode = if (next) VideoHdrMode.AUTO else VideoHdrMode.OFF
-        setVideoHdrMode(mode)
-    }
-
-    fun cycleVideoHdrMode() {
-        val next = when (videoHdrState.value.mode) {
-            VideoHdrMode.OFF -> VideoHdrMode.AUTO
-            VideoHdrMode.AUTO -> VideoHdrMode.MANUAL
-            VideoHdrMode.MANUAL -> VideoHdrMode.OFF
-        }
-        setVideoHdrMode(next)
-    }
-
-    fun setVideoHdrManualIntensity(intensity: Int) {
-        preferences.videoHdrManualIntensity = intensity
-        engine.setVideoHdrManualIntensity(intensity)
-    }
-
-    fun setVideoHdrManualShadows(value: Int) {
-        preferences.videoHdrManualShadows = value
-        engine.setVideoHdrManualShadows(value)
-    }
-
-    fun setVideoHdrManualHighlights(value: Int) {
-        preferences.videoHdrManualHighlights = value
-        engine.setVideoHdrManualHighlights(value)
-    }
-
-    fun setVideoHdrManualContrast(value: Int) {
-        preferences.videoHdrManualContrast = value
-        engine.setVideoHdrManualContrast(value)
-    }
-
-    fun setVideoHdrManualExposure(value: Int) {
-        preferences.videoHdrManualExposure = value
-        engine.setVideoHdrManualExposure(value)
-    }
-
-    fun setVideoHdrManualBlackLevel(value: Int) {
-        preferences.videoHdrManualBlackLevel = value
-        engine.setVideoHdrManualBlackLevel(value)
-    }
-
-    fun setVideoHdrManualMidtones(value: Int) {
-        preferences.videoHdrManualMidtones = value
-        engine.setVideoHdrManualMidtones(value)
-    }
-
-    fun setVideoHdrManualSaturation(value: Int) {
-        preferences.videoHdrManualSaturation = value
-        engine.setVideoHdrManualSaturation(value)
-    }
-
-    fun setVideoHdrPanelOpen(isOpen: Boolean) {
-        _isVideoHdrPanelOpen.value = isOpen
-    }
-
-    fun toggleVideoHdrPanel() {
-        _isVideoHdrPanelOpen.value = !_isVideoHdrPanelOpen.value
     }
 
     fun setCameraMode(mode: CameraMode) {

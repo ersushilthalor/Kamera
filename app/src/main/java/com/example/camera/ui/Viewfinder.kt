@@ -47,6 +47,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import android.graphics.Bitmap
 import com.example.camera.model.CameraMode
 import com.example.camera.model.CinemaColorProfile
 import com.example.camera.model.CinemaConfig
@@ -77,8 +81,8 @@ fun Viewfinder(
     isLutPreviewEnabled: Boolean = false,
     cinemaConfig: CinemaConfig? = null,
     rec2020AutoToneParams: com.example.camera.engine.Rec2020AutoToneParams? = null,
-    isVideoPipelineEnabled: Boolean = true,
-    activeVideoPipeline: com.example.camera.pipeline.video.VideoPipelineType = com.example.camera.pipeline.video.VideoPipelineType.HDR,
+    rawPreviewBitmap: Bitmap? = null,
+    rawVideoTelemetry: com.example.camera.engine.RawVideoTelemetry? = null,
     onSurfaceTextureAvailable: (SurfaceTexture?) -> Unit,
     onTapToFocus: (Offset, Float, Float) -> Unit,
     onZoomChange: (Float) -> Unit,
@@ -296,10 +300,6 @@ fun Viewfinder(
                                     hasFilter = true
                                 }
                             }
-                        } else if (cameraMode == CameraMode.VIDEO && isVideoPipelineEnabled && activeVideoPipeline != com.example.camera.pipeline.video.VideoPipelineType.OFF) {
-                            val pipelineMat = com.example.camera.pipeline.video.HdrVideoPipeline().getPreviewColorMatrix()
-                            colorMatrix.postConcat(pipelineMat)
-                            hasFilter = true
                         } else if (cameraMode == CameraMode.PHOTO && activePhotoFilter != null && activePhotoFilter != PhotoFilter.ORIGINAL) {
                             val filterMat = activePhotoFilter.toAndroidColorMatrix()
                             if (filterMat != null) {
@@ -319,7 +319,20 @@ fun Viewfinder(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Optional Non-Destructive Live LUT / Filter / Video Pipeline Monitoring Badge
+                // Dedicated Sensor Bayer RAW Video Viewfinder Display
+                // Completely bypasses ISP, tone curves, and YUV conversions
+                if (cameraMode == CameraMode.RAW_VIDEO && rawPreviewBitmap != null) {
+                    Image(
+                        bitmap = rawPreviewBitmap.asImageBitmap(),
+                        contentDescription = "Sensor Bayer RAW Direct Viewfinder",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag("raw_sensor_viewfinder_image")
+                    )
+                }
+
+                // Optional Non-Destructive Live LUT / Filter / RAW Monitoring Badge
                 val badgeLut = activeLut ?: cinemaConfig?.selectedLut
                 val badgeLutPreview = isLutPreviewEnabled || (cinemaConfig?.isLutPreviewEnabled == true)
                 if (cameraMode == CameraMode.CINEMA && badgeLutPreview && badgeLut != null && badgeLut != CinematicLut.NONE) {
@@ -340,23 +353,37 @@ fun Viewfinder(
                             letterSpacing = 0.5.sp
                         )
                     }
-                } else if (cameraMode == CameraMode.VIDEO && isVideoPipelineEnabled && activeVideoPipeline != com.example.camera.pipeline.video.VideoPipelineType.OFF) {
+                } else if (cameraMode == CameraMode.RAW_VIDEO) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(8.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xCC111318))
-                            .border(1.dp, activeVideoPipeline.accentColor.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                            .background(Color(0xCC002018))
+                            .border(1.dp, Color(0xFF64FFDA).copy(alpha = 0.7f), RoundedCornerShape(8.dp))
                             .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .testTag("raw_viewfinder_live_badge")
                     ) {
-                        Text(
-                            text = "PIPE: ${activeVideoPipeline.badgeLabel}",
-                            color = activeVideoPipeline.accentColor,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.5.sp
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF64FFDA))
+                            )
+                            val fpsStr = rawVideoTelemetry?.formattedFps ?: "30.0 fps"
+                            val bitStr = rawVideoTelemetry?.formattedBitrate ?: "Bayer Stream"
+                            Text(
+                                text = "TRUE RAW 16b • BYPASS ISP • $fpsStr • $bitStr",
+                                color = Color(0xFF64FFDA),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.5.sp
+                            )
+                        }
                     }
                 } else if (cameraMode == CameraMode.PHOTO && activePhotoFilter != null && activePhotoFilter != PhotoFilter.ORIGINAL) {
                     Box(

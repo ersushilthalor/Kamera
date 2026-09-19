@@ -118,7 +118,7 @@ fun CameraScreen(
     val portraitConfig by viewModel.portraitConfig.collectAsStateWithLifecycle()
     val portraitProcessingState by viewModel.portraitProcessingState.collectAsStateWithLifecycle()
     val isPortraitSettingsOpen by viewModel.isPortraitSettingsOpen.collectAsStateWithLifecycle()
-    val isHdrVideoActive by viewModel.isHdrVideoActive.collectAsStateWithLifecycle()
+    val rawPreviewBitmap by viewModel.rawPreviewBitmap.collectAsStateWithLifecycle()
     val rawVideoTelemetry by viewModel.rawVideoTelemetry.collectAsStateWithLifecycle()
     val saveSelfieAsPreviewed by viewModel.saveSelfieAsPreviewed.collectAsStateWithLifecycle()
     val photoMegapixelMode by viewModel.photoMegapixelMode.collectAsStateWithLifecycle()
@@ -209,9 +209,6 @@ fun CameraScreen(
     val isPipelineSheetOpen by viewModel.isPipelineSheetOpen.collectAsStateWithLifecycle()
     val isBeforeAfterOpen by viewModel.isBeforeAfterOpen.collectAsStateWithLifecycle()
     val latestPipelineCapture by viewModel.latestPipelineCapture.collectAsStateWithLifecycle()
-    val isVideoPipelineEnabled by viewModel.isVideoPipelineEnabled.collectAsStateWithLifecycle()
-    val activeVideoPipeline by viewModel.activeVideoPipeline.collectAsStateWithLifecycle()
-    val isVideoPipelineSheetOpen by viewModel.isVideoPipelineSheetOpen.collectAsStateWithLifecycle()
 
     var isCustomUiStudioOpen by remember { mutableStateOf(false) }
 
@@ -272,8 +269,8 @@ fun CameraScreen(
             isLutPreviewEnabled = cinemaConfig.isLutPreviewEnabled,
             cinemaConfig = cinemaConfig,
             rec2020AutoToneParams = rec2020AutoToneParams,
-            isVideoPipelineEnabled = isVideoPipelineEnabled,
-            activeVideoPipeline = activeVideoPipeline,
+            rawPreviewBitmap = rawPreviewBitmap,
+            rawVideoTelemetry = rawVideoTelemetry,
             onSurfaceTextureAvailable = { texture ->
                 viewModel.engine.setPreviewSurfaceTexture(texture)
             },
@@ -407,38 +404,6 @@ fun CameraScreen(
             }
         }
 
-        // Real HDR Video Indicator Pill
-        if (cameraMode == CameraMode.VIDEO && isHdrVideoActive) {
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xCC002B24),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF64FFDA).copy(alpha = 0.6f)),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .statusBarsPadding()
-                    .padding(top = 58.dp)
-                    .testTag("hdr_video_active_hud")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF64FFDA))
-                    )
-                    Text(
-                        text = if (isRecordingVideo) "HDR 10b Multi-Frame REC • BT.2020 / HLG" else "HDR VIDEO ACTIVE • 10-bit / Multi-Frame Path",
-                        color = Color(0xFF64FFDA),
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
 
         // 1g. Motorola Instant Camera Switching Picture-in-Picture Little Preview
         LittlePreviewOverlay(
@@ -492,10 +457,6 @@ fun CameraScreen(
             },
             onVideoQualityClick = { viewModel.cycleVideoQuality() },
             onVideoSettingsClick = { viewModel.toggleVideoSettingsPanel() },
-            isVideoPipelineEnabled = isVideoPipelineEnabled,
-            activeVideoPipeline = activeVideoPipeline,
-            onVideoPipelineClick = { viewModel.cycleNextVideoPipeline() },
-            onVideoPipelineLongClick = { viewModel.setVideoPipelineSheetOpen(true) },
             onToggleMegapixelMode = { viewModel.togglePhotoMegapixelMode() },
             onDollyZoomClick = {
                 if (cameraMode == CameraMode.DOLLY_ZOOM) {
@@ -520,7 +481,6 @@ fun CameraScreen(
                 currentResolution = selectedVideoResolution,
                 currentFps = videoFps,
                 isUltraStabilizationEnabled = hybridStabilizationConfig.isUltraStabilizationEnabled,
-                isHdrVideoActive = isHdrVideoActive,
                 onResolutionSelected = { res ->
                     viewModel.selectVideoResolution(res)
                 },
@@ -529,9 +489,6 @@ fun CameraScreen(
                 },
                 onUltraStabilizationToggle = {
                     viewModel.toggleUltraStabilization()
-                },
-                onHdrVideoToggle = {
-                    viewModel.toggleHdrVideo()
                 },
                 onDismiss = { viewModel.setVideoSettingsPanelOpen(false) },
                 modifier = Modifier
@@ -716,11 +673,6 @@ fun CameraScreen(
             onSelectRawVideo = {
                 viewModel.setMoreModesOpen(false)
                 viewModel.setCameraMode(CameraMode.RAW_VIDEO)
-            },
-            onSelectHdrVideo = {
-                viewModel.setMoreModesOpen(false)
-                viewModel.setCameraMode(CameraMode.VIDEO)
-                viewModel.setVideoHdrMode(com.example.camera.model.VideoHdrMode.AUTO)
             },
             onOpenSettings = {
                 viewModel.setMoreModesOpen(false)
@@ -925,14 +877,6 @@ fun CameraScreen(
                 viewModel.setSettingsOpen(false)
                 viewModel.setBeforeAfterOpen(true)
             },
-            isVideoPipelineEnabled = isVideoPipelineEnabled,
-            activeVideoPipeline = activeVideoPipeline,
-            onVideoPipelineToggle = { viewModel.toggleVideoPipelineEnabled(it) },
-            onSelectVideoPipeline = { viewModel.selectVideoPipeline(it) },
-            onOpenVideoPipelineSheet = {
-                viewModel.setSettingsOpen(false)
-                viewModel.setVideoPipelineSheetOpen(true)
-            },
             instantSwitchState = instantSwitchState,
             onKeepUltraWideReadyToggle = { viewModel.setKeepUltraWideReady(it) },
             onShowUltraWidePreviewToggle = { viewModel.setShowUltraWidePreview(it) },
@@ -982,14 +926,6 @@ fun CameraScreen(
             com.example.camera.pipeline.ui.CustomPipelineBottomSheet(
                 viewModel = viewModel,
                 onDismissRequest = { viewModel.setPipelineSheetOpen(false) }
-            )
-        }
-
-        // 9b. Real Hardware Video Processing Pipeline Bottom Sheet
-        if (isVideoPipelineSheetOpen) {
-            com.example.camera.pipeline.video.VideoPipelineBottomSheet(
-                viewModel = viewModel,
-                onDismissRequest = { viewModel.setVideoPipelineSheetOpen(false) }
             )
         }
 

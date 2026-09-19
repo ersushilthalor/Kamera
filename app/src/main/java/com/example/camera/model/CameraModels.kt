@@ -242,35 +242,6 @@ enum class ViewfinderResolution(
     MAX("Max (~4K)", "Full sensor resolution preview", 4096)
 }
 
-enum class VideoHdrMode(val label: String, val description: String) {
-    OFF("OFF", "HDR Disabled"),
-    AUTO("AUTO", "Automatic Scene & Low-Light Optimization"),
-    MANUAL("MANUAL", "Manual Dynamic Range Intensity")
-}
-
-data class VideoHdrState(
-    val mode: VideoHdrMode = VideoHdrMode.AUTO,
-    val manualIntensity: Int = 50, // 0 to 100
-    val manualShadows: Int = 50, // 0 to 100 (default 50 = neutral baseline)
-    val manualHighlights: Int = 50, // 0 to 100 (default 50 = neutral baseline)
-    val manualContrast: Int = 50, // 0 to 100 (default 50 = neutral baseline)
-    val manualExposure: Int = 50, // 0 to 100 (default 50 = neutral baseline)
-    val manualBlackLevel: Int = 50, // 0 to 100 (default 50 = neutral baseline)
-    val manualMidtones: Int = 50, // 0 to 100 (default 50 = neutral baseline)
-    val manualSaturation: Int = 50, // 0 to 100 (default 50 = neutral baseline)
-    val isHdrActive: Boolean = true,
-    val currentStrength: Float = 0f,
-    val shadowLift: Float = 0f,
-    val highlightProtection: Float = 0f,
-    val contrastFactor: Float = 1.0f,
-    val noiseReductionStrength: Float = 0f,
-    val currentIso: Int = 100,
-    val estimatedEv: Float = 10f,
-    val isMotionDetected: Boolean = false,
-    val statusDescription: String = "HDR Auto: Ready"
-)
-
-
 enum class ColorProfile(val title: String, val isFlat: Boolean) {
     STANDARD("Standard", false),
     VIBRANT("Vibrant", false),
