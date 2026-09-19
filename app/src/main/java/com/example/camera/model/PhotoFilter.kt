@@ -25,6 +25,20 @@ enum class PhotoFilter(
         matrixValues = null
     ),
 
+    HDR_FILTER(
+        id = "hdr_filter",
+        displayName = "HDR Look",
+        subtitle = "Foliage green pop, shadow lift & skin fidelity",
+        category = "HDR",
+        swatchColor = Color(0xFF2E7D32),
+        matrixValues = floatArrayOf(
+            1.08f, 0.02f, -0.02f, 0f, 14f,
+            -0.02f, 1.22f, 0.02f, 0f, 12f,
+            -0.04f, 0.02f, 1.06f, 0f, 10f,
+            0f, 0f, 0f, 1f, 0f
+        )
+    ),
+
     CINEMATIC_TEAL(
         id = "cine_teal",
         displayName = "Teal & Gold",
@@ -244,4 +258,6 @@ enum class PhotoFilter(
         val vals = matrixValues ?: return null
         return android.graphics.ColorMatrix(vals)
     }
+
+    fun getMatrixValues(): FloatArray? = matrixValues
 }

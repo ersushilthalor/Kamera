@@ -12,7 +12,8 @@ enum class CameraMode(val title: String) {
     NIGHT("Night"),
     DOLLY_ZOOM("Dolly"),
     MORE("More"),
-    AI_SUBJECT_TRACKING("AI Tracking")
+    AI_SUBJECT_TRACKING("AI Tracking"),
+    RAW_VIDEO("RAW Video")
 }
 
 data class PortraitConfig(

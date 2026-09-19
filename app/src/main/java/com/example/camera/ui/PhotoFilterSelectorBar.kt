@@ -63,7 +63,7 @@ fun PhotoFilterSelectorBar(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "PHOTO FILTERS",
+                        text = "FILTERS & LOOKS",
                         color = Color(0xFF64FFDA),
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.ExtraBold,

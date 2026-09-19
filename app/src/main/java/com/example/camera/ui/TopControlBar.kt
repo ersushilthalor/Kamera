@@ -336,6 +336,27 @@ fun TopControlBar(
                         )
                     }
                 }
+                CameraMode.RAW_VIDEO -> {
+                    Box(
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(17.dp))
+                            .background(Color(0xFFE65100).copy(alpha = 0.25f))
+                            .border(1.dp, Color(0xFFFF9800), RoundedCornerShape(17.dp))
+                            .padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "RAW BAYER",
+                            color = Color(0xFFFFB74D),
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
                 CameraMode.CINEMA -> {
                     val resLabel = when {
                         cinemaConfig.selectedResolution?.width == 3840 || cinemaConfig.selectedResolution?.height == 3840 -> "4K"
@@ -509,6 +530,27 @@ fun TopControlBar(
                     ) {
                         Text(
                             text = "$videoFps",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+                CameraMode.RAW_VIDEO -> {
+                    Box(
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(17.dp))
+                            .background(Color(0xB21A1A1E))
+                            .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(17.dp))
+                            .padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "${videoFps}FPS",
                             color = Color.White,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
@@ -769,7 +811,7 @@ fun TopControlBar(
             }
         }
 
-        val isVideoFamily = (cameraMode == CameraMode.VIDEO || cameraMode == CameraMode.CINEMA || cameraMode == CameraMode.DOLLY_ZOOM)
+        val isVideoFamily = (cameraMode == CameraMode.VIDEO || cameraMode == CameraMode.CINEMA || cameraMode == CameraMode.DOLLY_ZOOM || cameraMode == CameraMode.RAW_VIDEO)
 
         // Render Top Controls according to layoutConfig
         val visibleItems = layoutConfig.topControlsOrder.filterNot { layoutConfig.hiddenTopControls.contains(it) }
@@ -781,7 +823,7 @@ fun TopControlBar(
             TopBarAlignment.COMPACT_RIGHT -> Arrangement.spacedBy(layoutConfig.topControlsSpacingDp.dp, Alignment.End)
         }
 
-        val shouldScroll = (if (isVideoFamily) 5 else visibleItems.size) > 5
+        val shouldScroll = (if (isVideoFamily) 6 else visibleItems.size) > 5
         val topScrollState = rememberScrollState()
 
         Row(
@@ -799,6 +841,20 @@ fun TopControlBar(
                 timerAudioButton()
                 gridAssistButton()
                 cinemaSettingsQuickButton()
+                settingsButton()
+            } else if (cameraMode == CameraMode.RAW_VIDEO) {
+                flashButton()
+                timerAudioButton()
+                primaryBadge()
+                secondaryBadge()
+                gridAssistButton()
+                settingsButton()
+            } else if (cameraMode == CameraMode.VIDEO) {
+                flashButton()
+                filterButton()
+                primaryBadge()
+                secondaryBadge()
+                videoPipelineBadge()
                 settingsButton()
             } else if (isVideoFamily) {
                 flashButton()

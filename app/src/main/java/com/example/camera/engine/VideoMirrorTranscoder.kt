@@ -35,14 +35,20 @@ class VideoMirrorTranscoder {
     }
 
     /**
-     * Mirrors the video horizontally from inputFile to outputFile.
-     * Audio track is passed through sample-by-sample without re-encoding.
-     * Video track is decoded, flipped horizontally via OpenGL hardware texture blit,
-     * and re-encoded using hardware MediaCodec.
-     *
-     * Returns true if mirroring was successful, false on error.
+     * Transcodes video from inputFile to outputFile with optional horizontal mirroring
+     * and optional ColorMatrix filter transformation.
+     * Audio track is passed through sample-by-sample without lossy re-encoding.
      */
     fun mirrorVideo(inputFile: File, outputFile: File): Boolean {
+        return transcodeVideo(inputFile, outputFile, isMirrored = true, colorMatrix = null)
+    }
+
+    fun transcodeVideo(
+        inputFile: File,
+        outputFile: File,
+        isMirrored: Boolean,
+        colorMatrix: FloatArray? = null
+    ): Boolean {
         if (!inputFile.exists() || inputFile.length() == 0L) {
             Log.e(TAG, "Input file does not exist or is empty")
             return false
@@ -187,7 +193,7 @@ class VideoMirrorTranscoder {
                         decoder.releaseOutputBuffer(decStatus, render)
                         if (render) {
                             eglHelper.awaitNewImage()
-                            eglHelper.drawImage(isMirrored = true)
+                            eglHelper.drawImage(isMirrored = isMirrored, colorMatrix = colorMatrix)
                             eglHelper.setPresentationTime(bufferInfo.presentationTimeUs * 1000L)
                             eglHelper.swapBuffers()
                         }
@@ -285,11 +291,16 @@ class VideoMirrorTranscoder {
         private var program: Int = 0
         private var uMVPMatrixLoc: Int = -1
         private var uSTMatrixLoc: Int = -1
+        private var uColorMatrixLoc: Int = -1
+        private var uColorOffsetLoc: Int = -1
+        private var uHasColorMatrixLoc: Int = -1
         private var aPositionLoc: Int = -1
         private var aTextureCoordLoc: Int = -1
 
         private val mvpMatrix = FloatArray(16)
         private val stMatrix = FloatArray(16)
+        private val glColorMatrix = FloatArray(16)
+        private val glColorOffset = FloatArray(4)
 
         @Volatile
         private var frameAvailable = false
@@ -376,8 +387,17 @@ class VideoMirrorTranscoder {
                 precision mediump float;
                 varying vec2 vTextureCoord;
                 uniform samplerExternalOES sTexture;
+                uniform mat4 uColorMatrix;
+                uniform vec4 uColorOffset;
+                uniform int uHasColorMatrix;
                 void main() {
-                    gl_FragColor = texture2D(sTexture, vTextureCoord);
+                    vec4 texColor = texture2D(sTexture, vTextureCoord);
+                    if (uHasColorMatrix != 0) {
+                        vec3 rgb = clamp((uColorMatrix * vec4(texColor.rgb, 1.0)).rgb + uColorOffset.rgb, 0.0, 1.0);
+                        gl_FragColor = vec4(rgb, texColor.a);
+                    } else {
+                        gl_FragColor = texColor;
+                    }
                 }
             """.trimIndent()
 
@@ -394,6 +414,9 @@ class VideoMirrorTranscoder {
             aTextureCoordLoc = GLES20.glGetAttribLocation(program, "aTextureCoord")
             uMVPMatrixLoc = GLES20.glGetUniformLocation(program, "uMVPMatrix")
             uSTMatrixLoc = GLES20.glGetUniformLocation(program, "uSTMatrix")
+            uColorMatrixLoc = GLES20.glGetUniformLocation(program, "uColorMatrix")
+            uColorOffsetLoc = GLES20.glGetUniformLocation(program, "uColorOffset")
+            uHasColorMatrixLoc = GLES20.glGetUniformLocation(program, "uHasColorMatrix")
 
             val textures = IntArray(1)
             GLES20.glGenTextures(1, textures, 0)
@@ -436,7 +459,7 @@ class VideoMirrorTranscoder {
             surfaceTexture.getTransformMatrix(stMatrix)
         }
 
-        fun drawImage(isMirrored: Boolean) {
+        fun drawImage(isMirrored: Boolean, colorMatrix: FloatArray? = null) {
             makeCurrent()
             GLES20.glViewport(0, 0, width, height)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
@@ -451,6 +474,26 @@ class VideoMirrorTranscoder {
 
             GLES20.glUniformMatrix4fv(uMVPMatrixLoc, 1, false, mvpMatrix, 0)
             GLES20.glUniformMatrix4fv(uSTMatrixLoc, 1, false, stMatrix, 0)
+
+            if (colorMatrix != null && colorMatrix.size >= 20) {
+                GLES20.glUniform1i(uHasColorMatrixLoc, 1)
+
+                // Column-major 4x4 matrix
+                glColorMatrix[0] = colorMatrix[0]; glColorMatrix[1] = colorMatrix[5]; glColorMatrix[2] = colorMatrix[10]; glColorMatrix[3] = colorMatrix[15]
+                glColorMatrix[4] = colorMatrix[1]; glColorMatrix[5] = colorMatrix[6]; glColorMatrix[6] = colorMatrix[11]; glColorMatrix[7] = colorMatrix[16]
+                glColorMatrix[8] = colorMatrix[2]; glColorMatrix[9] = colorMatrix[7]; glColorMatrix[10] = colorMatrix[12]; glColorMatrix[11] = colorMatrix[17]
+                glColorMatrix[12] = colorMatrix[3]; glColorMatrix[13] = colorMatrix[8]; glColorMatrix[14] = colorMatrix[13]; glColorMatrix[15] = colorMatrix[18]
+
+                glColorOffset[0] = colorMatrix[4] / 255.0f
+                glColorOffset[1] = colorMatrix[9] / 255.0f
+                glColorOffset[2] = colorMatrix[14] / 255.0f
+                glColorOffset[3] = colorMatrix[19] / 255.0f
+
+                GLES20.glUniformMatrix4fv(uColorMatrixLoc, 1, false, glColorMatrix, 0)
+                GLES20.glUniform4fv(uColorOffsetLoc, 1, glColorOffset, 0)
+            } else {
+                GLES20.glUniform1i(uHasColorMatrixLoc, 0)
+            }
 
             GLES20.glEnableVertexAttribArray(aPositionLoc)
             GLES20.glVertexAttribPointer(aPositionLoc, 3, GLES20.GL_FLOAT, false, 12, vertexBuffer)

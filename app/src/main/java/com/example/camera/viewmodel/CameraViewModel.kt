@@ -11,7 +11,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.camera.data.CameraPreferences
 import com.example.camera.engine.Camera2Engine
+import com.example.camera.engine.HdrHardwareProfile
 import com.example.camera.engine.PortraitProcessor
+import com.example.camera.engine.RawVideoTelemetry
 import com.example.camera.model.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -138,6 +140,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     // Video HDR State & Panel visibility
     val videoHdrState: StateFlow<VideoHdrState> = engine.videoHdrState
+    val hdrHardwareProfile: StateFlow<HdrHardwareProfile> = engine.hdrHardwareProfile
+    val isHdrVideoActive: StateFlow<Boolean> = engine.isHdrVideoActive
+    val rawVideoTelemetry: StateFlow<RawVideoTelemetry> = engine.rawVideoTelemetry
     private val _isVideoHdrPanelOpen = MutableStateFlow(false)
     val isVideoHdrPanelOpen: StateFlow<Boolean> = _isVideoHdrPanelOpen.asStateFlow()
 
@@ -565,15 +570,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         engine.refocusFrameCount = preferences.getModeRefocusFrameCount(initialMode)
         engine.isHighQualityZoomEnabled = preferences.getModeHqZoomEnabled(initialMode)
         engine.zoomProcessingQuality = preferences.getModeZoomQuality(initialMode)
-        // Video HDR system removed: permanently OFF
-        engine.setVideoHdrMode(VideoHdrMode.OFF)
+        // Video HDR system initialization
+        val initHdr = preferences.videoHdrMode
+        engine.setVideoHdrMode(initHdr)
+        engine.setHdrVideoActive(initHdr != VideoHdrMode.OFF)
         engine.setMode(initialMode)
         engine.restoreInitialVideoResolution(CameraResolution(preferences.videoWidth, preferences.videoHeight))
         engine.setCinemaConfig(preferences.getCinemaConfig())
         engine.updateHybridStabilizationConfig(preferences.hybridStabilizationConfig)
 
         // Restore initial mode aspect ratio
-        if (initialMode == CameraMode.VIDEO || initialMode == CameraMode.CINEMA || initialMode == CameraMode.DOLLY_ZOOM) {
+        if (initialMode == CameraMode.VIDEO || initialMode == CameraMode.CINEMA || initialMode == CameraMode.DOLLY_ZOOM || initialMode == CameraMode.RAW_VIDEO) {
             _selectedAspectRatio.value = CameraAspectRatio.RATIO_9_16
             engine.setPreviewAspectRatio(16f / 9f)
         } else {
@@ -660,7 +667,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun setVideoHdrMode(mode: VideoHdrMode) {
         preferences.videoHdrMode = mode
         engine.setVideoHdrMode(mode)
+        engine.setHdrVideoActive(mode != VideoHdrMode.OFF)
         showToast("Video HDR: ${mode.label}")
+    }
+
+    fun toggleHdrVideo() {
+        val current = engine.isHdrVideoActive.value
+        val next = !current
+        val mode = if (next) VideoHdrMode.AUTO else VideoHdrMode.OFF
+        setVideoHdrMode(mode)
     }
 
     fun cycleVideoHdrMode() {
@@ -847,8 +862,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         engine.updatePreviewSettings()
 
-        // Apply true 9:16 aspect ratio for Video and Cinema modes before session reconfiguration
-        if (mode == CameraMode.VIDEO || mode == CameraMode.CINEMA || mode == CameraMode.DOLLY_ZOOM) {
+        // Apply true 9:16 aspect ratio for Video, Cinema, and RAW Video modes before session reconfiguration
+        if (mode == CameraMode.VIDEO || mode == CameraMode.CINEMA || mode == CameraMode.DOLLY_ZOOM || mode == CameraMode.RAW_VIDEO) {
             _selectedAspectRatio.value = CameraAspectRatio.RATIO_9_16
             engine.setPreviewAspectRatio(16f / 9f)
         } else if (mode == CameraMode.PHOTO || mode == CameraMode.PORTRAIT || mode == CameraMode.NIGHT || mode == CameraMode.MORE) {
@@ -1388,7 +1403,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         when (_cameraMode.value) {
             CameraMode.PHOTO, CameraMode.MORE, CameraMode.AI_SUBJECT_TRACKING -> triggerPhotoCapture()
             CameraMode.PORTRAIT -> triggerPortraitCapture()
-            CameraMode.VIDEO, CameraMode.CINEMA, CameraMode.DOLLY_ZOOM -> triggerVideoCapture()
+            CameraMode.VIDEO, CameraMode.CINEMA, CameraMode.DOLLY_ZOOM, CameraMode.RAW_VIDEO -> triggerVideoCapture()
             CameraMode.NIGHT -> triggerNightCapture()
         }
     }
