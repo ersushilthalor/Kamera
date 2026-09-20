@@ -535,9 +535,10 @@ class MotorolaInstantSwitchEngine(
     fun isConcurrentSessionReady(targetLens: LensInfo): Boolean {
         synchronized(sessionLock) {
             if (!isConcurrentHardwareSupported) return false
+            val standbyLens = activeStandbyLens ?: return false
             return standbyCameraDevice != null &&
                     standbyCaptureSession != null &&
-                    activeStandbyLens?.cameraId == targetLens.cameraId
+                    (standbyLens.cameraId == targetLens.cameraId || standbyLens.lensType == targetLens.lensType)
         }
     }
 
@@ -563,6 +564,9 @@ class MotorolaInstantSwitchEngine(
             val warmDevice = standbyCameraDevice ?: return null
             val warmSession = standbyCaptureSession ?: return null
 
+            if (targetLens.lensType == LensType.ULTRAWIDE) {
+                Log.i(TAG, "[UW_SWITCH] requested")
+            }
             Log.i(TAG, "[INSTANT SWITCH] Switching active stream to ${targetLens.lensType} (No session recreation)")
 
             val result = ConcurrentSessionBundle(
@@ -575,6 +579,9 @@ class MotorolaInstantSwitchEngine(
 
             // Switch displayed texture in compositor
             compositor.switchActiveStream(targetLens.lensType, switchStartNs)
+
+            // Ensure the target camera repeating request continuously produces frames on its compositor surface
+            ensureSessionRepeatingRequest(warmSession, warmDevice, targetLens)
 
             // The previously active camera now becomes the warm standby camera in reverse!
             standbyCameraDevice = currentDevice
@@ -596,6 +603,35 @@ class MotorolaInstantSwitchEngine(
             )
 
             return result
+        }
+    }
+
+    /**
+     * Verify repeating request on the active session so frames continuously flow to the compositor surface.
+     */
+    fun ensureSessionRepeatingRequest(session: CameraCaptureSession, device: CameraDevice, lens: LensInfo) {
+        val handler = backgroundHandler ?: return
+        val previewSurf = if (lens.lensType == LensType.ULTRAWIDE) {
+            compositor.ultraWideCameraSurface
+        } else {
+            compositor.mainCameraSurface
+        } ?: return
+        if (!previewSurf.isValid) return
+
+        try {
+            val req = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                addTarget(previewSurf)
+                set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
+            }.build()
+            session.setRepeatingRequest(req, null, handler)
+            if (lens.lensType == LensType.ULTRAWIDE) {
+                Log.i(TAG, "[UW_SWITCH] target session active")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to verify active repeating request for ${lens.lensType}", e)
         }
     }
 

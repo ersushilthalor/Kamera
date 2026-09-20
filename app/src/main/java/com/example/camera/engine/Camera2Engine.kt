@@ -904,7 +904,32 @@ class Camera2Engine(private val context: Context) {
                 imageReaderYuv = bundle.imageReaderYuv
                 _isCameraReady.value = true
                 inspectCapabilities(lens.cameraId)
-                updatePreviewSettings()
+
+                // Update previewRequestBuilder targeting the compositor surface for the newly active lens
+                val targetSurf = if (lens.lensType == LensType.ULTRAWIDE) {
+                    motorolaSwitchEngine.compositor.ultraWideCameraSurface
+                } else {
+                    motorolaSwitchEngine.compositor.mainCameraSurface
+                } ?: previewSurface
+
+                if (targetSurf != null && targetSurf.isValid) {
+                    try {
+                        val newBuilder = bundle.cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                            addTarget(targetSurf)
+                            applyCommonSettings(this)
+                        }
+                        previewRequestBuilder = newBuilder
+                        bundle.captureSession.setRepeatingRequest(newBuilder.build(), captureCallback, backgroundHandler)
+                        if (lens.lensType == LensType.ULTRAWIDE) {
+                            Log.i(TAG, "[UW_SWITCH] target session active")
+                        } else {
+                            Log.i(TAG, "[SWITCH] target session active for ${lens.lensType}")
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to submit repeating preview request on target session for ${lens.lensType}", e)
+                    }
+                }
+
                 val elapsedMs = (System.nanoTime() - switchStartNs) / 1_000_000L
                 Log.i(TAG, "[INSTANT CONCURRENT SWITCH] Switched to ${lens.lensType} in ${elapsedMs}ms (0 sessions recreated)")
                 return

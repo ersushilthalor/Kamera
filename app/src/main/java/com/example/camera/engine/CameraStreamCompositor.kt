@@ -76,28 +76,33 @@ class CameraStreamCompositor {
     private val mainTexMatrix = FloatArray(16)
     private val ultraWideTexMatrix = FloatArray(16)
 
-    // Active Displayed Lens
+    // Active and Pending Displayed Lens
     @Volatile
     var activeLensType: LensType = LensType.WIDE
         private set
+
+    @Volatile
+    private var pendingActiveLens: LensType? = null
 
     // Standby Little Preview Visibility
     @Volatile
     var isLittlePreviewEnabled: Boolean = false
 
-    // Frame availability flags and independent frame counters
-    private val isMainFrameAvailable = AtomicBoolean(false)
-    private val isUltraWideFrameAvailable = AtomicBoolean(false)
-    private val mainFrameCount = AtomicLong(0L)
-    private val ultraWideFrameCount = AtomicLong(0L)
+    // Frame availability flags and independent frame sequence counters (per-lens atomic state)
+    val mainFrameAvailable = AtomicBoolean(false)
+    val ultraWideFrameAvailable = AtomicBoolean(false)
+    val mainFrameSequence = AtomicLong(0L)
+    val ultraWideFrameSequence = AtomicLong(0L)
     private val lastMainTimestampNs = AtomicLong(0L)
     private val lastUltraWideTimestampNs = AtomicLong(0L)
 
+    // Valid texture flags (strictly updated on GL thread)
+    private var hasValidMainTexture: Boolean = false
+    private var hasValidUltraWideTexture: Boolean = false
+
     // Switch Verification
     @Volatile
-    private var targetSwitchBaselineFrameCount: Long = 0L
-    @Volatile
-    private var switchPendingFirstFrame: Boolean = false
+    private var targetSwitchBaselineSequence: Long = 0L
     @Volatile
     private var forceMainRender: Boolean = false
 
@@ -105,6 +110,9 @@ class CameraStreamCompositor {
     @Volatile
     private var switchStartNs: Long = 0L
     var onFirstFrameRendered: ((targetLens: LensType, latencyMs: Long) -> Unit)? = null
+
+    // Render scheduling throttle to avoid message queue explosion
+    private val isRenderPending = AtomicBoolean(false)
 
     // Background GL Thread
     private var glThread: HandlerThread? = null
@@ -302,8 +310,8 @@ class CameraStreamCompositor {
         val mainSt = SurfaceTexture(mainTexId).apply {
             setDefaultBufferSize(1920, 1080)
             setOnFrameAvailableListener({
-                mainFrameCount.incrementAndGet()
-                isMainFrameAvailable.set(true)
+                mainFrameSequence.incrementAndGet()
+                mainFrameAvailable.set(true)
                 triggerRender()
             }, handler)
         }
@@ -314,8 +322,9 @@ class CameraStreamCompositor {
         val uwSt = SurfaceTexture(ultraWideTexId).apply {
             setDefaultBufferSize(1920, 1080)
             setOnFrameAvailableListener({
-                ultraWideFrameCount.incrementAndGet()
-                isUltraWideFrameAvailable.set(true)
+                val seq = ultraWideFrameSequence.incrementAndGet()
+                ultraWideFrameAvailable.set(true)
+                Log.d(TAG, "[UW_FRAME] frameSequence=$seq")
                 triggerRender()
             }, handler)
         }
@@ -369,7 +378,6 @@ class CameraStreamCompositor {
                 try {
                     mainEglSurface = EGL14.eglCreateWindowSurface(display, eglConfig, surface, surfaceAttribs, 0)
                     Log.d(TAG, "Main Viewfinder EGL Surface attached ($mainWidth x $mainHeight)")
-                    forceMainRender = true
                     triggerRender()
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to create main EGL window surface", e)
@@ -416,35 +424,45 @@ class CameraStreamCompositor {
 
     /**
      * Switch which camera stream is presented to the main viewfinder.
-     * Takes effect on the next render frame (< 16ms).
+     * Keeps rendering current valid frame until first fresh target frame arrives.
      *
      * @param targetLens LensType to display (WIDE or ULTRAWIDE)
      * @param startTimestampNs nanoTime recorded when the user pressed the switch button
      */
     fun switchActiveStream(targetLens: LensType, startTimestampNs: Long = System.nanoTime()) {
-        switchStartNs = startTimestampNs
-        activeLensType = targetLens
-        targetSwitchBaselineFrameCount = if (targetLens == LensType.ULTRAWIDE) {
-            ultraWideFrameCount.get()
-        } else {
-            mainFrameCount.get()
+        if (targetLens == LensType.ULTRAWIDE) {
+            Log.i(TAG, "[UW_SWITCH] requested")
         }
-        switchPendingFirstFrame = true
-        forceMainRender = true
-        Log.i(TAG, "Compositor switching active stream to: $targetLens (baselineFrameCount=$targetSwitchBaselineFrameCount)")
-        triggerRender()
+        glHandler?.post {
+            switchStartNs = startTimestampNs
+            if (activeLensType == targetLens && pendingActiveLens == null) {
+                Log.d(TAG, "Already active lens: $targetLens")
+                return@post
+            }
+            pendingActiveLens = targetLens
+            targetSwitchBaselineSequence = if (targetLens == LensType.ULTRAWIDE) {
+                ultraWideFrameSequence.get()
+            } else {
+                mainFrameSequence.get()
+            }
+            Log.i(TAG, "Compositor switching active stream request: $targetLens (baselineSequence=$targetSwitchBaselineSequence, currentActive=$activeLensType)")
+            renderFrame()
+        }
     }
 
-    fun getMainFrameCount(): Long = mainFrameCount.get()
-    fun getUltraWideFrameCount(): Long = ultraWideFrameCount.get()
+    fun getMainFrameCount(): Long = mainFrameSequence.get()
+    fun getUltraWideFrameCount(): Long = ultraWideFrameSequence.get()
     fun getMainTimestamp(): Long = lastMainTimestampNs.get()
     fun getUltraWideTimestamp(): Long = lastUltraWideTimestampNs.get()
-    fun getFrameCount(lens: LensType): Long = if (lens == LensType.ULTRAWIDE) ultraWideFrameCount.get() else mainFrameCount.get()
+    fun getFrameCount(lens: LensType): Long = if (lens == LensType.ULTRAWIDE) ultraWideFrameSequence.get() else mainFrameSequence.get()
     fun getTimestamp(lens: LensType): Long = if (lens == LensType.ULTRAWIDE) lastUltraWideTimestampNs.get() else lastMainTimestampNs.get()
 
     private fun triggerRender() {
-        glHandler?.post {
-            renderFrame()
+        if (isRenderPending.compareAndSet(false, true)) {
+            glHandler?.post {
+                isRenderPending.set(false)
+                renderFrame()
+            }
         }
     }
 
@@ -456,97 +474,150 @@ class CameraStreamCompositor {
         var newUltraWideFrame = false
 
         // 1. Consume available frames to keep both hardware pipelines flowing & 3A converged
-        if (isMainFrameAvailable.getAndSet(false)) {
+        if (mainFrameAvailable.compareAndSet(true, false)) {
             try {
                 mainCameraSurfaceTexture?.updateTexImage()
                 mainCameraSurfaceTexture?.getTransformMatrix(mainTexMatrix)
                 val ts = mainCameraSurfaceTexture?.timestamp ?: 0L
                 lastMainTimestampNs.set(ts)
+                hasValidMainTexture = true
                 newMainFrame = true
             } catch (e: Exception) {
                 Log.w(TAG, "Error updating main texture image", e)
             }
         }
 
-        if (isUltraWideFrameAvailable.getAndSet(false)) {
+        if (ultraWideFrameAvailable.compareAndSet(true, false)) {
             try {
                 ultraWideCameraSurfaceTexture?.updateTexImage()
                 ultraWideCameraSurfaceTexture?.getTransformMatrix(ultraWideTexMatrix)
                 val ts = ultraWideCameraSurfaceTexture?.timestamp ?: 0L
                 lastUltraWideTimestampNs.set(ts)
+                hasValidUltraWideTexture = true
                 newUltraWideFrame = true
+                val seq = ultraWideFrameSequence.get()
+                Log.d(TAG, "[UW_RENDER] frameSequence=$seq")
+                Log.d(TAG, "[UW_RENDER] texture updated")
             } catch (e: Exception) {
                 Log.w(TAG, "Error updating ultrawide texture image", e)
             }
         }
 
-        val activeLens = activeLensType
-        val mainSurf = mainEglSurface
-        val shouldForceMain = forceMainRender
-        forceMainRender = false
-
-        val hasNewActiveFrame = if (activeLens == LensType.ULTRAWIDE) {
-            newUltraWideFrame
-        } else {
-            newMainFrame
-        }
-
-        val activeTotalFrames = if (activeLens == LensType.ULTRAWIDE) {
-            ultraWideFrameCount.get()
-        } else {
-            mainFrameCount.get()
-        }
-
-        // 2. Render to Main Viewfinder EGL Surface
-        // Only render if a new frame arrived for active lens, or on forceMainRender when frames exist.
-        // Do not repeatedly render the same old Ultra-Wide frame.
-        if (mainSurf != null && (hasNewActiveFrame || (shouldForceMain && activeTotalFrames > 0L))) {
-            EGL14.eglMakeCurrent(display, mainSurf, mainSurf, ctx)
-            GLES20.glViewport(0, 0, mainWidth, mainHeight)
-            GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f)
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-
-            if (activeLens == LensType.ULTRAWIDE) {
-                drawQuad(ultraWideTexId, ultraWideTexMatrix)
+        // 2. Check pending stream switch (atomic handoff on first fresh target frame)
+        val pending = pendingActiveLens
+        if (pending != null) {
+            val targetSequence = if (pending == LensType.ULTRAWIDE) {
+                ultraWideFrameSequence.get()
             } else {
-                drawQuad(mainTexId, mainTexMatrix)
+                mainFrameSequence.get()
+            }
+            val targetHasValidTexture = if (pending == LensType.ULTRAWIDE) {
+                hasValidUltraWideTexture
+            } else {
+                hasValidMainTexture
             }
 
-            EGL14.eglSwapBuffers(display, mainSurf)
-
-            // 3. Verify new frame arrival after switch request before completing switch latency
-            val startNs = switchStartNs
-            if (switchPendingFirstFrame && hasNewActiveFrame && activeTotalFrames > targetSwitchBaselineFrameCount) {
-                switchPendingFirstFrame = false
+            // Fresh frame arrived on target lens (sequence > baseline)
+            if (targetHasValidTexture && targetSequence > targetSwitchBaselineSequence) {
+                activeLensType = pending
+                pendingActiveLens = null
+                if (pending == LensType.ULTRAWIDE) {
+                    Log.i(TAG, "[UW_SWITCH] first fresh frame received")
+                }
+                val startNs = switchStartNs
                 if (startNs > 0) {
                     switchStartNs = 0L
-                    val latencyNs = System.nanoTime() - startNs
-                    val latencyMs = latencyNs / 1_000_000L
-                    Log.i(TAG, "[LATENCY] Instant switch to $activeLens verified and displayed in ${latencyMs}ms (frame #$activeTotalFrames > $targetSwitchBaselineFrameCount)")
-                    onFirstFrameRendered?.invoke(activeLens, latencyMs)
+                    val latencyMs = (System.nanoTime() - startNs) / 1_000_000L
+                    Log.i(TAG, "[LATENCY] Instant switch to $pending verified and displayed in ${latencyMs}ms (frame #$targetSequence > baseline $targetSwitchBaselineSequence)")
+                    onFirstFrameRendered?.invoke(pending, latencyMs)
                 }
+            } else {
+                // Target lens has not produced fresh frame yet:
+                // Check on next render tick (~16ms) without blocking the GL thread
+                glHandler?.postDelayed({
+                    if (pendingActiveLens != null) {
+                        renderFrame()
+                    }
+                }, 16)
             }
         }
 
-        // 4. Render to Little Preview EGL Surface (if visible)
-        val littleSurf = littleEglSurface
-        val hasNewStandbyFrame = if (activeLens == LensType.ULTRAWIDE) newMainFrame else newUltraWideFrame
-        if (isLittlePreviewEnabled && littleSurf != null && (hasNewStandbyFrame || shouldForceMain)) {
-            EGL14.eglMakeCurrent(display, littleSurf, littleSurf, ctx)
-            GLES20.glViewport(0, 0, littleWidth, littleHeight)
-            GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f)
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        // 3. Render active stream to Main Viewfinder EGL Surface
+        val mainSurf = mainEglSurface
+        val currentActive = activeLensType
 
-            // Little Preview displays the STANDBY camera stream:
-            // When Main is active -> Little Preview shows Ultra-Wide
-            // When Ultra-Wide is active -> Little Preview shows Main
-            if (activeLens == LensType.ULTRAWIDE) {
-                drawQuad(mainTexId, mainTexMatrix)
+        val targetTexId: Int
+        val targetTexMatrix: FloatArray
+
+        if (currentActive == LensType.ULTRAWIDE) {
+            if (hasValidUltraWideTexture) {
+                targetTexId = ultraWideTexId
+                targetTexMatrix = ultraWideTexMatrix
+            } else if (hasValidMainTexture) {
+                // Fallback while waiting for first fresh Ultra-Wide frame
+                targetTexId = mainTexId
+                targetTexMatrix = mainTexMatrix
             } else {
-                drawQuad(ultraWideTexId, ultraWideTexMatrix)
+                targetTexId = 0
+                targetTexMatrix = mainTexMatrix
+            }
+        } else {
+            if (hasValidMainTexture) {
+                targetTexId = mainTexId
+                targetTexMatrix = mainTexMatrix
+            } else if (hasValidUltraWideTexture) {
+                // Fallback while waiting for first fresh Main frame
+                targetTexId = ultraWideTexId
+                targetTexMatrix = ultraWideTexMatrix
+            } else {
+                targetTexId = 0
+                targetTexMatrix = mainTexMatrix
+            }
+        }
+
+        if (mainSurf != null && targetTexId != 0) {
+            EGL14.eglMakeCurrent(display, mainSurf, mainSurf, ctx)
+            GLES20.glViewport(0, 0, mainWidth, mainHeight)
+            drawQuad(targetTexId, targetTexMatrix)
+            EGL14.eglSwapBuffers(display, mainSurf)
+            if (targetTexId == ultraWideTexId) {
+                val seq = ultraWideFrameSequence.get()
+                Log.d(TAG, "[UW_RENDER] frameSequence=$seq")
+            }
+        }
+
+        // 4. Render standby stream to Little Preview EGL Surface (if visible)
+        val littleSurf = littleEglSurface
+        if (isLittlePreviewEnabled && littleSurf != null) {
+            val standbyTexId: Int
+            val standbyTexMatrix: FloatArray
+
+            if (currentActive == LensType.ULTRAWIDE) {
+                if (hasValidMainTexture) {
+                    standbyTexId = mainTexId
+                    standbyTexMatrix = mainTexMatrix
+                } else {
+                    standbyTexId = 0
+                    standbyTexMatrix = mainTexMatrix
+                }
+            } else {
+                if (hasValidUltraWideTexture) {
+                    standbyTexId = ultraWideTexId
+                    standbyTexMatrix = ultraWideTexMatrix
+                } else {
+                    standbyTexId = 0
+                    standbyTexMatrix = ultraWideTexMatrix
+                }
             }
 
-            EGL14.eglSwapBuffers(display, littleSurf)
+            if (standbyTexId != 0) {
+                EGL14.eglMakeCurrent(display, littleSurf, littleSurf, ctx)
+                GLES20.glViewport(0, 0, littleWidth, littleHeight)
+                GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f)
+                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+                drawQuad(standbyTexId, standbyTexMatrix)
+                EGL14.eglSwapBuffers(display, littleSurf)
+            }
         }
     }
 
