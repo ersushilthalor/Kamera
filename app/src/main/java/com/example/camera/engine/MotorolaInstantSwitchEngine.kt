@@ -435,6 +435,47 @@ class MotorolaInstantSwitchEngine(
     }
 
     /**
+     * Query target camera's CameraCharacteristics & SCALER_STREAM_CONFIGURATION_MAP
+     * to select the highest valid native JPEG and YUV resolutions supported by that specific camera.
+     * Prefers 4:3 aspect ratio, falling back to the largest supported size.
+     * Never hardcodes 4000x3000, and never falls back directly to 1920x1080.
+     */
+    fun getOptimalPhotoSizesForLens(lens: LensInfo): Pair<Size, Size> {
+        val chars = try {
+            cameraManager?.getCameraCharacteristics(lens.cameraId)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get characteristics for lens ${lens.cameraId}", e)
+            null
+        }
+        val map = chars?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+        val jpegSizes = map?.getOutputSizes(ImageFormat.JPEG)?.toList() ?: emptyList()
+        val yuvSizes = map?.getOutputSizes(ImageFormat.YUV_420_888)?.toList() ?: emptyList()
+
+        // 1. Select highest valid JPEG resolution (prefer 4:3 aspect ratio ~1.333)
+        val jpeg43Sizes = jpegSizes.filter { size ->
+            val ratio = maxOf(size.width, size.height).toFloat() / minOf(size.width, size.height).toFloat()
+            kotlin.math.abs(ratio - (4f / 3f)) < 0.05f
+        }
+        val bestJpeg = jpeg43Sizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+            ?: jpegSizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+            ?: Size(3264, 2448) // Native 8MP default if characteristics are missing in test
+
+        // 2. Select highest valid YUV resolution (prefer 4:3 aspect ratio ~1.333)
+        val yuv43Sizes = yuvSizes.filter { size ->
+            val ratio = maxOf(size.width, size.height).toFloat() / minOf(size.width, size.height).toFloat()
+            kotlin.math.abs(ratio - (4f / 3f)) < 0.05f
+        }
+        val bestYuv = yuv43Sizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+            ?: yuvSizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+            ?: bestJpeg
+
+        val jpegMp = (bestJpeg.width.toLong() * bestJpeg.height.toLong()) / 1_000_000f
+        Log.i(TAG, "[PHOTO_RES] Selected native photo resolution for ${lens.lensType} (cameraId=${lens.cameraId}): " +
+                "JPEG=${bestJpeg.width}x${bestJpeg.height} (~${jpegMp}MP), YUV=${bestYuv.width}x${bestYuv.height}")
+        return Pair(bestJpeg, bestYuv)
+    }
+
+    /**
      * Creates the standby camera capture session ahead of time.
      * Configures:
      * - Persistent Surface from compositor (compositor.ultraWideCameraSurface)
@@ -454,20 +495,25 @@ class MotorolaInstantSwitchEngine(
             return
         }
 
-        // Configure ImageReaders ahead of time
+        // Configure ImageReaders ahead of time using target camera's actual supported resolution
         try { standbyImageReaderJpeg?.close() } catch (ignored: Throwable) {}
         try { standbyImageReaderYuv?.close() } catch (ignored: Throwable) {}
 
-        val photoWidth = 4000
-        val photoHeight = 3000
+        val (bestJpeg, bestYuv) = getOptimalPhotoSizesForLens(lens)
 
         try {
-            standbyImageReaderJpeg = ImageReader.newInstance(photoWidth, photoHeight, ImageFormat.JPEG, 4)
-            standbyImageReaderYuv = ImageReader.newInstance(photoWidth, photoHeight, ImageFormat.YUV_420_888, 3)
+            standbyImageReaderJpeg = ImageReader.newInstance(bestJpeg.width, bestJpeg.height, ImageFormat.JPEG, 4)
+            standbyImageReaderYuv = ImageReader.newInstance(bestYuv.width, bestYuv.height, ImageFormat.YUV_420_888, 3)
+            Log.i(TAG, "[UW_PHOTO] Standby ImageReaders created successfully with native resolution: JPEG=${bestJpeg.width}x${bestJpeg.height}, YUV=${bestYuv.width}x${bestYuv.height}")
         } catch (e: Exception) {
+            Log.w(TAG, "Failed creating max native ImageReaders for ${lens.lensType}, attempting fallback to largest supported", e)
+            val chars = try { cameraManager?.getCameraCharacteristics(lens.cameraId) } catch (t: Throwable) { null }
+            val map = chars?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            val fallbackJpeg = map?.getOutputSizes(ImageFormat.JPEG)?.maxByOrNull { it.width * it.height } ?: bestJpeg
+            val fallbackYuv = map?.getOutputSizes(ImageFormat.YUV_420_888)?.maxByOrNull { it.width * it.height } ?: bestYuv
             try {
-                standbyImageReaderJpeg = ImageReader.newInstance(1920, 1080, ImageFormat.JPEG, 4)
-                standbyImageReaderYuv = ImageReader.newInstance(1920, 1080, ImageFormat.YUV_420_888, 3)
+                standbyImageReaderJpeg = ImageReader.newInstance(fallbackJpeg.width, fallbackJpeg.height, ImageFormat.JPEG, 4)
+                standbyImageReaderYuv = ImageReader.newInstance(fallbackYuv.width, fallbackYuv.height, ImageFormat.YUV_420_888, 3)
             } catch (ignored: Throwable) {}
         }
 
@@ -576,6 +622,13 @@ class MotorolaInstantSwitchEngine(
                 imageReaderYuv = standbyImageReaderYuv,
                 lens = targetLens
             )
+
+            val jpegW = standbyImageReaderJpeg?.width ?: 0
+            val jpegH = standbyImageReaderJpeg?.height ?: 0
+            val yuvW = standbyImageReaderYuv?.width ?: 0
+            val yuvH = standbyImageReaderYuv?.height ?: 0
+            val mp = (jpegW.toLong() * jpegH.toLong()) / 1_000_000f
+            Log.i(TAG, "[UW_PHOTO] Instant switch handoff to ${targetLens.lensType}: ImageReader JPEG=${jpegW}x${jpegH} (~${mp}MP), YUV=${yuvW}x${yuvH}")
 
             // Switch displayed texture in compositor
             compositor.switchActiveStream(targetLens.lensType, switchStartNs)

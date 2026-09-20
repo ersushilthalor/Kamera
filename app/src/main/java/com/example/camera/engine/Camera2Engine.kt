@@ -29,8 +29,10 @@ import android.os.Build
 import android.os.Environment
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.StatFs
+import java.util.concurrent.Executor
 import android.provider.MediaStore
 import android.util.Log
 import android.util.Range
@@ -752,22 +754,32 @@ class Camera2Engine(private val context: Context) {
                 .sortedByDescending { it.width * it.height }
                 .map { CameraResolution(it.width, it.height, ImageFormat.RAW_SENSOR, isRaw = true) }
 
-            // Video Resolutions
+            // Video Resolutions: strictly validate against camera sensor's supported sizes
             val videoSizes = map?.getOutputSizes(MediaRecorder::class.java)
                 ?: map?.getOutputSizes(SurfaceTexture::class.java)
                 ?: emptyArray()
 
             val standardVideoQualities = listOf(
-                CameraResolution(3840, 2160), // 4K UHD (Supported across 0.5x, 1x and Selfie)
+                CameraResolution(3840, 2160), // 4K UHD
                 CameraResolution(1920, 1080), // 1080p FHD
                 CameraResolution(1280, 720),  // 720p HD
                 CameraResolution(720, 480)    // 480p SD
             )
-            val filteredVideoResolutions = standardVideoQualities.filter { standard ->
-                videoSizes.isEmpty() || videoSizes.any { it.width == standard.width && it.height == standard.height } || standard.width <= 3840
-            }.ifEmpty {
+            val filteredVideoResolutions = if (videoSizes.isNotEmpty()) {
+                val matched = standardVideoQualities.filter { standard ->
+                    videoSizes.any { it.width == standard.width && it.height == standard.height }
+                }
+                if (matched.isNotEmpty()) {
+                    matched
+                } else {
+                    videoSizes
+                        .filter { it.width >= 640 && it.height >= 480 }
+                        .sortedByDescending { it.width.toLong() * it.height.toLong() }
+                        .map { CameraResolution(it.width, it.height) }
+                        .distinctBy { "${it.width}x${it.height}" }
+                }
+            } else {
                 listOf(
-                    CameraResolution(3840, 2160),
                     CameraResolution(1920, 1080),
                     CameraResolution(1280, 720)
                 )
@@ -904,6 +916,13 @@ class Camera2Engine(private val context: Context) {
                 imageReaderYuv = bundle.imageReaderYuv
                 _isCameraReady.value = true
                 inspectCapabilities(lens.cameraId)
+
+                val activeJpegW = bundle.imageReaderJpeg?.width ?: 0
+                val activeJpegH = bundle.imageReaderJpeg?.height ?: 0
+                val activeYuvW = bundle.imageReaderYuv?.width ?: 0
+                val activeYuvH = bundle.imageReaderYuv?.height ?: 0
+                val activeMp = (activeJpegW.toLong() * activeJpegH.toLong()) / 1_000_000f
+                Log.i(TAG, "[PHOTO_RES] Switched active lens to ${lens.lensType}: ImageReader JPEG=${activeJpegW}x${activeJpegH} (~${activeMp}MP), YUV=${activeYuvW}x${activeYuvH}")
 
                 // Update previewRequestBuilder targeting the compositor surface for the newly active lens
                 val targetSurf = if (lens.lensType == LensType.ULTRAWIDE) {
@@ -1349,13 +1368,25 @@ class Camera2Engine(private val context: Context) {
         imageReaderYuv = null
 
         val caps = _capabilities.value
+        val supportedPhotoRes = caps.supportedPhotoResolutions
         val is50MMode = photoMegapixelMode == PhotoMegapixelMode.M50
-        val photoRes = if (is50MMode) {
-            caps.supportedPhotoResolutions.maxByOrNull { it.width * it.height }
+        val baseRes = if (is50MMode) {
+            supportedPhotoRes.maxByOrNull { it.width * it.height }
                 ?: _selectedPhotoResolution.value
                 ?: CameraResolution(4000, 3000)
         } else {
-            _selectedPhotoResolution.value ?: CameraResolution(4000, 3000)
+            _selectedPhotoResolution.value ?: supportedPhotoRes.firstOrNull() ?: CameraResolution(4000, 3000)
+        }
+
+        val photoRes = if (supportedPhotoRes.isNotEmpty() && !supportedPhotoRes.contains(baseRes)) {
+            supportedPhotoRes.filter {
+                val r = maxOf(it.width, it.height).toFloat() / minOf(it.width, it.height).toFloat()
+                kotlin.math.abs(r - (4f / 3f)) < 0.05f
+            }.maxByOrNull { it.width * it.height }
+                ?: supportedPhotoRes.maxByOrNull { it.width * it.height }
+                ?: baseRes
+        } else {
+            baseRes
         }
 
         try {
@@ -1366,18 +1397,21 @@ class Camera2Engine(private val context: Context) {
                 4
             )
         } catch (t: Throwable) {
-            Log.e(TAG, "Failed to create ImageReader with ${photoRes.width}x${photoRes.height}, falling back to 1080p", t)
+            Log.e(TAG, "Failed to create ImageReader with ${photoRes.width}x${photoRes.height}, falling back to largest supported", t)
+            val fallback = supportedPhotoRes.firstOrNull() ?: CameraResolution(1920, 1080)
             try {
-                imageReaderJpeg = ImageReader.newInstance(1920, 1080, ImageFormat.JPEG, 4)
+                imageReaderJpeg = ImageReader.newInstance(fallback.width, fallback.height, ImageFormat.JPEG, 4)
             } catch (t2: Throwable) {
                 Log.e(TAG, "Failed fallback ImageReader", t2)
             }
         }
 
         try {
+            val yuvWidth = imageReaderJpeg?.width ?: photoRes.width
+            val yuvHeight = imageReaderJpeg?.height ?: photoRes.height
             imageReaderYuv = ImageReader.newInstance(
-                photoRes.width,
-                photoRes.height,
+                yuvWidth,
+                yuvHeight,
                 ImageFormat.YUV_420_888,
                 3
             )
@@ -1413,6 +1447,19 @@ class Camera2Engine(private val context: Context) {
             compositorSurf
         } else {
             previewSurface ?: return
+        }
+
+        // Close previous session safely to avoid overlapping capture sessions
+        val oldSession = captureSession
+        if (oldSession != null) {
+            try {
+                oldSession.stopRepeating()
+                oldSession.abortCaptures()
+            } catch (ignored: Throwable) {}
+            try {
+                oldSession.close()
+            } catch (ignored: Throwable) {}
+            captureSession = null
         }
 
         isConfiguringSession = true
@@ -2594,6 +2641,12 @@ class Camera2Engine(private val context: Context) {
         val readerYuv = imageReaderYuv
         val isPipelineEnabled = preferences.isCustomPipelineEnabled && readerYuv != null
 
+        val activeLens = _selectedLens.value
+        val jpegW = readerJpeg.width
+        val jpegH = readerJpeg.height
+        val mp = (jpegW.toLong() * jpegH.toLong()) / 1_000_000f
+        Log.i(TAG, "[PHOTO_CAPTURE] Initiating capture on ${activeLens?.lensType}: ImageReader JPEG=${jpegW}x${jpegH} (~${mp}MP), YUV=${readerYuv?.width}x${readerYuv?.height}")
+
         _isCapturing.value = true
 
         try {
@@ -3434,6 +3487,33 @@ class Camera2Engine(private val context: Context) {
     }
 
     /**
+     * Helper to resolve the active preview surface for either Main or Ultra-Wide streams.
+     */
+    private fun getActivePreviewSurface(): Surface? {
+        val activeLens = _selectedLens.value
+        val isUltraWide = activeLens?.lensType == LensType.ULTRAWIDE
+        val compositorSurf = if (isUltraWide) {
+            motorolaSwitchEngine.compositor.ultraWideCameraSurface
+        } else {
+            motorolaSwitchEngine.compositor.mainCameraSurface
+        }
+        return if (compositorSurf != null && compositorSurf.isValid) {
+            compositorSurf
+        } else if (previewSurface?.isValid == true) {
+            previewSurface
+        } else {
+            null
+        }
+    }
+
+    private fun findBestFpsRange(chars: CameraCharacteristics, targetFps: Int): Range<Int>? {
+        val availableFpsRanges = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: return null
+        return availableFpsRanges.firstOrNull { it.upper == targetFps && it.lower == targetFps }
+            ?: availableFpsRanges.firstOrNull { it.upper == targetFps }
+            ?: availableFpsRanges.firstOrNull { it.upper >= targetFps && it.lower <= targetFps }
+    }
+
+    /**
      * Creates an end-to-end 10-bit HDR or standard capture session for recording.
      * When 10-bit is requested and the device supports DynamicRangeProfiles (Android 13+),
      * this configures the recorder surface with HLG10/HDR10 to ensure raw 10-bit HAL stream buffers.
@@ -3445,6 +3525,8 @@ class Camera2Engine(private val context: Context) {
         is10Bit: Boolean,
         callback: CameraCaptureSession.StateCallback
     ) {
+        val executor = Executor { command -> backgroundHandler?.post(command) ?: command.run() }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && is10Bit) {
             try {
                 val chars = getCharacteristics(camera.id)
@@ -3465,7 +3547,7 @@ class Camera2Engine(private val context: Context) {
                     val sessionConfig = SessionConfiguration(
                         SessionConfiguration.SESSION_REGULAR,
                         listOf(previewConfig, recorderConfig),
-                        Executors.newSingleThreadExecutor(),
+                        executor,
                         callback
                     )
                     camera.createCaptureSession(sessionConfig)
@@ -3477,7 +3559,64 @@ class Camera2Engine(private val context: Context) {
             }
         }
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                val sessionConfig = SessionConfiguration(
+                    SessionConfiguration.SESSION_REGULAR,
+                    listOf(OutputConfiguration(previewSurface), OutputConfiguration(recorderSurface)),
+                    executor,
+                    callback
+                )
+                camera.createCaptureSession(sessionConfig)
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed SessionConfiguration for standard recording, falling back to createCaptureSession", e)
+            }
+        }
+
+        @Suppress("DEPRECATION")
         camera.createCaptureSession(listOf(previewSurface, recorderSurface), callback, backgroundHandler)
+    }
+
+    /**
+     * Safely releases failed recording resources, restores preview, and notifies error callback.
+     */
+    private fun cleanupFailedRecording(onError: (String) -> Unit, message: String) {
+        _isRecordingVideo.value = false
+        isSoftwareCinemaRecording = false
+        videoTimerJob?.cancel()
+        activeRecordingSurface = null
+
+        try {
+            cinemaSoftwareRecorder.stopRecording()
+        } catch (ignored: Throwable) {}
+
+        try {
+            mediaRecorder?.reset()
+            mediaRecorder?.release()
+        } catch (ignored: Throwable) {}
+        mediaRecorder = null
+
+        try {
+            videoRecordingFileDescriptor?.close()
+        } catch (ignored: Throwable) {}
+        videoRecordingFileDescriptor = null
+
+        currentRecordingTempFile?.let { f ->
+            try { f.delete() } catch (ignored: Throwable) {}
+            currentRecordingTempFile = null
+        }
+
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            onError(message)
+        } else {
+            Handler(Looper.getMainLooper()).post { onError(message) }
+        }
+
+        // CRITICAL: Restore the preview session on backgroundHandler so the viewfinder NEVER freezes
+        backgroundHandler?.post {
+            createCameraCaptureSession()
+        }
     }
 
     /**
@@ -3486,20 +3625,68 @@ class Camera2Engine(private val context: Context) {
     fun startVideoRecording(onError: (String) -> Unit) {
         if (_isRecordingVideo.value) return
 
-        val camera = cameraDevice ?: return
-        val lens = _selectedLens.value ?: return
+        val camera = cameraDevice ?: run {
+            onError("Camera device not ready")
+            return
+        }
+        val lens = _selectedLens.value ?: run {
+            onError("No active lens selected")
+            return
+        }
+        val previewSurf = getActivePreviewSurface() ?: run {
+            onError("Preview surface not ready")
+            return
+        }
 
         try {
-            closeCameraCaptureSession()
+            val chars = getCharacteristics(lens.cameraId)
+            val map = chars?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
 
+            // 1. Validate supported video resolutions against actual sensor configuration
             val isCinema = (currentMode == CameraMode.CINEMA)
-            val videoRes = if (isCinema && cinemaConfig.value.selectedResolution != null) {
+            val requestedRes = if (isCinema && cinemaConfig.value.selectedResolution != null) {
                 cinemaConfig.value.selectedResolution!!
             } else {
                 _selectedVideoResolution.value ?: CameraResolution(1920, 1080)
             }
+
+            val supportedVideoSizes = map?.getOutputSizes(MediaRecorder::class.java)
+                ?: map?.getOutputSizes(SurfaceTexture::class.java)
+                ?: emptyArray()
+
+            val isSupported = supportedVideoSizes.any { it.width == requestedRes.width && it.height == requestedRes.height }
+            val videoRes = if (isSupported) {
+                requestedRes
+            } else {
+                val largest = supportedVideoSizes
+                    .filter { maxOf(it.width, it.height) <= 3840 }
+                    .maxByOrNull { it.width * it.height }
+                if (largest != null) {
+                    Log.w(TAG, "[RECORDING] Size ${requestedRes.width}x${requestedRes.height} unsupported for ${lens.lensType}, using ${largest.width}x${largest.height}")
+                    CameraResolution(largest.width, largest.height)
+                } else {
+                    CameraResolution(1920, 1080)
+                }
+            }
+
+            // 2. Validate FPS range
+            val targetFps = if (isCinema) cinemaConfig.value.videoFps else videoFps
+            val matchedFpsRange = chars?.let { findBestFpsRange(it, targetFps) }
+
+            // 3. Dynamic Range & Codec validation
             val cinemaCodec = if (isCinema) cinemaConfig.value.codec else CinemaCodec.H264
-            val is10BitRequested = isCinema && (cinemaConfig.value.logBitDepth == LogBitDepth.BIT_10 || cinemaCodec == CinemaCodec.PRORES)
+            val dynamicProfiles = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                chars?.get(CameraCharacteristics.REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES)
+            } else null
+            val supportedProfiles = dynamicProfiles?.supportedProfiles ?: emptySet()
+            val has10BitDynamicRange = supportedProfiles.contains(DynamicRangeProfiles.HLG10) ||
+                    supportedProfiles.contains(DynamicRangeProfiles.HDR10) ||
+                    supportedProfiles.contains(DynamicRangeProfiles.HDR10_PLUS)
+
+            val is10BitRequested = isCinema &&
+                    (cinemaConfig.value.logBitDepth == LogBitDepth.BIT_10 || cinemaCodec == CinemaCodec.PRORES) &&
+                    has10BitDynamicRange
+
             val baseBitrate = if (isCinema) {
                 when {
                     cinemaCodec == CinemaCodec.PRORES -> {
@@ -3529,7 +3716,6 @@ class Camera2Engine(private val context: Context) {
                 }
             }
             val bitrate = baseBitrate
-            val targetFps = if (isCinema) cinemaConfig.value.videoFps else videoFps
             val isSoftwareCinema = isCinema && (cinemaCodec == CinemaCodec.PRORES || cinemaCodec == CinemaCodec.VP9)
 
             val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
@@ -3541,7 +3727,6 @@ class Camera2Engine(private val context: Context) {
             currentVideoFileName = fileName
             currentVideoMimeType = mimeType
 
-            // 1. Ensure directory exists and create dedicated temporary recording file
             val recordingDir = context.externalCacheDir ?: context.cacheDir
             recordingDir.mkdirs()
 
@@ -3556,11 +3741,11 @@ class Camera2Engine(private val context: Context) {
             }
             currentRecordingTempFile = tempFile
 
-            // Software Codec Check for Cinema Mode (VP9 & Apple ProRes 422 10-bit)
+            // Setup recording target surface
+            val recorderSurface: Surface
             if (isSoftwareCinema) {
                 isSoftwareCinemaRecording = true
-
-                val recorderSurface = cinemaSoftwareRecorder.startRecording(
+                recorderSurface = cinemaSoftwareRecorder.startRecording(
                     destFile = tempFile,
                     width = videoRes.width,
                     height = videoRes.height,
@@ -3570,101 +3755,51 @@ class Camera2Engine(private val context: Context) {
                     bitDepth = if (is10BitRequested || cinemaCodec == CinemaCodec.PRORES) LogBitDepth.BIT_10 else LogBitDepth.BIT_8,
                     isAudioEnabled = isAudioEnabled
                 )
-                activeRecordingSurface = recorderSurface
-                val previewSurf = previewSurface ?: return
-                val surfaces = listOf(previewSurf, recorderSurface)
-
-                previewRequestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
-                    addTarget(previewSurf)
-                    addTarget(recorderSurface)
-                    applyCommonSettings(this)
-                }
-
-                createRecordingCaptureSession(
-                    camera = camera,
-                    previewSurface = previewSurf,
-                    recorderSurface = recorderSurface,
-                    is10Bit = is10BitRequested || cinemaCodec == CinemaCodec.PRORES,
-                    callback = object : CameraCaptureSession.StateCallback() {
-                        override fun onConfigured(session: CameraCaptureSession) {
-                            captureSession = session
-                            try {
-                                previewRequestBuilder?.let {
-                                    session.setRepeatingRequest(it.build(), captureCallback, backgroundHandler)
-                                }
-                                _isRecordingVideo.value = true
-                                startVideoTimer()
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Failed to start Software Cinema recording session", e)
-                                val errorDetail = getMediaCodecErrorDetail(e)
-                                onError("Cinema recording session error: $errorDetail")
-                                stopVideoRecording()
-                            }
-                        }
-
-                        override fun onConfigureFailed(session: CameraCaptureSession) {
-                            Log.e(TAG, "Failed to configure Software Cinema recording capture session")
-                            isSoftwareCinemaRecording = false
-                            try {
-                                cinemaSoftwareRecorder.stopRecording()
-                            } catch (ignored: Exception) {}
-                            currentRecordingTempFile?.let { f ->
-                                try { f.delete() } catch (ignored: Exception) {}
-                                currentRecordingTempFile = null
-                            }
-                            onError("Failed to configure cinema recording capture session")
-                        }
-                    }
-                )
-                return
-            }
-
-            // Hardware Recording (MediaRecorder for H.264 & H.265 / HEVC)
-            @Suppress("DEPRECATION")
-            mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                MediaRecorder(context)
             } else {
-                MediaRecorder()
-            }.apply {
-                setOnErrorListener { _, what, extra ->
+                @Suppress("DEPRECATION")
+                val mr = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    MediaRecorder(context)
+                } else {
+                    MediaRecorder()
+                }
+                mediaRecorder = mr
+
+                mr.setOnErrorListener { _, what, extra ->
                     Log.e(TAG, "MediaRecorder runtime error: what=$what extra=$extra")
                     onError("Hardware recording error (code=$what, extra=$extra)")
                 }
+
                 if (isAudioEnabled) {
                     try {
-                        setAudioSource(MediaRecorder.AudioSource.MIC)
+                        mr.setAudioSource(MediaRecorder.AudioSource.MIC)
                     } catch (e: Exception) {
                         Log.w(TAG, "AudioSource.MIC not available, continuing without audio", e)
                     }
                 }
-                setVideoSource(MediaRecorder.VideoSource.SURFACE)
-                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
 
-                // Passing ParcelFileDescriptor avoids permission/ENOENT issues in cameraserver process
+                mr.setVideoSource(MediaRecorder.VideoSource.SURFACE)
+                mr.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+
                 val pfd = ParcelFileDescriptor.open(tempFile, ParcelFileDescriptor.MODE_READ_WRITE)
                 videoRecordingFileDescriptor = pfd
-                setOutputFile(pfd.fileDescriptor)
+                mr.setOutputFile(pfd.fileDescriptor)
 
-                setVideoEncodingBitRate(bitrate)
-                setVideoFrameRate(targetFps)
-                setVideoSize(videoRes.width, videoRes.height)
-                setVideoEncodingBitRate(bitrate)
-                setVideoFrameRate(targetFps)
-                setVideoSize(videoRes.width, videoRes.height)
+                mr.setVideoEncodingBitRate(bitrate)
+                mr.setVideoFrameRate(targetFps)
+                mr.setVideoSize(videoRes.width, videoRes.height)
 
                 val useHevc = (cinemaCodec == CinemaCodec.H265) || is10BitRequested
                 if (useHevc) {
-                    setVideoEncoder(MediaRecorder.VideoEncoder.HEVC)
+                    mr.setVideoEncoder(MediaRecorder.VideoEncoder.HEVC)
                     if (is10BitRequested && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         try {
-                            setVideoEncodingProfileLevel(
+                            mr.setVideoEncodingProfileLevel(
                                 MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10,
                                 MediaCodecInfo.CodecProfileLevel.HEVCMainTierLevel51
                             )
                         } catch (e: Exception) {
-                            Log.w(TAG, "HEVC Main 10 Tier 5.1 profile level unsupported, trying Main profile", e)
                             try {
-                                setVideoEncodingProfileLevel(
+                                mr.setVideoEncodingProfileLevel(
                                     MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10,
                                     MediaCodecInfo.CodecProfileLevel.HEVCMainTierLevel41
                                 )
@@ -3672,156 +3807,130 @@ class Camera2Engine(private val context: Context) {
                         }
                     }
                 } else {
-                    setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+                    mr.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
                 }
 
                 if (isAudioEnabled) {
                     try {
-                        setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                        setAudioSamplingRate(48000)
-                        setAudioEncodingBitRate(192000)
+                        mr.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                        mr.setAudioSamplingRate(48000)
+                        mr.setAudioEncodingBitRate(192000)
                     } catch (ignored: Exception) {}
                 }
 
                 val orientationHint = getVideoOrientationHint()
-                setOrientationHint(orientationHint)
-                Log.d(TAG, "MediaRecorder configured with output=${tempFile.absolutePath}, codec=${if (useHevc) "HEVC" else "H264"}")
+                mr.setOrientationHint(orientationHint)
 
                 try {
-                    prepare()
+                    mr.prepare()
                 } catch (e: Exception) {
-                    Log.w(TAG, "MediaRecorder prepare failed with primary settings, trying baseline fallback", e)
+                    Log.w(TAG, "MediaRecorder prepare failed with primary settings, trying fallback", e)
                     if (useHevc) {
-                        try {
-                            reset()
-                            if (isAudioEnabled) {
-                                try { setAudioSource(MediaRecorder.AudioSource.MIC) } catch (ignored: Exception) {}
-                            }
-                            setVideoSource(MediaRecorder.VideoSource.SURFACE)
-                            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                            setOutputFile(tempFile.absolutePath)
-                            setVideoEncodingBitRate(minOf(bitrate, 40_000_000))
-                            setVideoFrameRate(targetFps)
-                            setVideoSize(videoRes.width, videoRes.height)
-                            setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-                            if (isAudioEnabled) {
-                                try {
-                                    setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                                    setAudioSamplingRate(48000)
-                                    setAudioEncodingBitRate(192000)
-                                } catch (ignored: Exception) {}
-                            }
-                            setOrientationHint(orientationHint)
-                            prepare()
-                            Log.i(TAG, "MediaRecorder fallback prepare succeeded with H.264")
-                        } catch (fallbackError: Exception) {
-                            val detail = getMediaCodecErrorDetail(fallbackError)
-                            throw IllegalStateException("Hardware video encoder failed: $detail", fallbackError)
+                        mr.reset()
+                        if (isAudioEnabled) {
+                            try { mr.setAudioSource(MediaRecorder.AudioSource.MIC) } catch (ignored: Exception) {}
                         }
+                        mr.setVideoSource(MediaRecorder.VideoSource.SURFACE)
+                        mr.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                        mr.setOutputFile(tempFile.absolutePath)
+                        mr.setVideoEncodingBitRate(minOf(bitrate, 40_000_000))
+                        mr.setVideoFrameRate(targetFps)
+                        mr.setVideoSize(videoRes.width, videoRes.height)
+                        mr.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+                        if (isAudioEnabled) {
+                            try {
+                                mr.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                                mr.setAudioSamplingRate(48000)
+                                mr.setAudioEncodingBitRate(192000)
+                            } catch (ignored: Exception) {}
+                        }
+                        mr.setOrientationHint(orientationHint)
+                        mr.prepare()
                     } else {
-                        val detail = getMediaCodecErrorDetail(e)
-                        throw IllegalStateException("Hardware video encoder failed: $detail", e)
+                        throw e
                     }
                 }
+
+                recorderSurface = mr.surface
             }
 
-            val videoRatio = max(videoRes.width, videoRes.height).toFloat() / min(videoRes.width, videoRes.height).toFloat()
-            _previewAspectRatio.value = videoRatio
-
-            // Ensure preview surface buffer matches video 16:9 ratio exactly to prevent any vertical stretch
-            previewSurfaceTexture?.let { texture ->
-                val chars = getCharacteristics(lens.cameraId) ?: return@let
-                val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                val previewSizes = map?.getOutputSizes(SurfaceTexture::class.java) ?: emptyArray()
-                val matchingSize = previewSizes
-                    .filter {
-                        val r = max(it.width, it.height).toFloat() / min(it.width, it.height).toFloat()
-                        kotlin.math.abs(r - videoRatio) < 0.05f
-                    }
-                    .filter { max(it.width, it.height) <= 1920 }
-                    .maxByOrNull { it.width * it.height }
-                    ?: previewSizes.firstOrNull { it.width == 1920 && it.height == 1080 }
-                    ?: Size(videoRes.width, videoRes.height)
-
-                texture.setDefaultBufferSize(matchingSize.width, matchingSize.height)
-                previewSurface = Surface(texture)
-            }
-
-            val recorderSurface = mediaRecorder!!.surface
             activeRecordingSurface = recorderSurface
-            val previewSurf = previewSurface ?: return
 
-            val surfaces = listOf(previewSurf, recorderSurface)
-
-            previewRequestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
-                addTarget(previewSurf)
-                addTarget(recorderSurface)
-                applyCommonSettings(this)
-            }
-
-            createRecordingCaptureSession(
-                camera = camera,
-                previewSurface = previewSurf,
-                recorderSurface = recorderSurface,
-                is10Bit = is10BitRequested,
-                callback = object : CameraCaptureSession.StateCallback() {
-                    override fun onConfigured(session: CameraCaptureSession) {
-                        captureSession = session
-                        try {
-                            previewRequestBuilder?.let {
-                                session.setRepeatingRequest(it.build(), captureCallback, backgroundHandler)
-                            }
-                            mediaRecorder?.start()
-                            _isRecordingVideo.value = true
-                            startVideoTimer()
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to start MediaRecorder recording", e)
-                            val detail = getMediaCodecErrorDetail(e)
-                            onError("Failed to start hardware recording: $detail")
-                            stopVideoRecording()
-                        }
+            // Safely coordinate session transition on camera backgroundHandler
+            backgroundHandler?.post {
+                val currentSession = captureSession
+                if (currentSession != null) {
+                    try {
+                        currentSession.stopRepeating()
+                        currentSession.abortCaptures()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error stopping repeating on current session before recording", e)
                     }
-
-                    override fun onConfigureFailed(session: CameraCaptureSession) {
-                        Log.e(TAG, "Hardware video capture session configure failed")
-                        _isRecordingVideo.value = false
-                        try {
-                            mediaRecorder?.reset()
-                            mediaRecorder?.release()
-                        } catch (ignored: Exception) {}
-                        mediaRecorder = null
-                        currentRecordingTempFile?.let { f ->
-                            try { f.delete() } catch (ignored: Exception) {}
-                            currentRecordingTempFile = null
-                        }
-                        currentVideoUri?.let { u ->
-                            try { context.contentResolver.delete(u, null, null) } catch (ignored: Exception) {}
-                            currentVideoUri = null
-                        }
-                        onError("Camera hardware failed to configure video capture session")
+                    try {
+                        currentSession.close()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error closing current session before recording", e)
                     }
+                    captureSession = null
                 }
-            )
+
+                try {
+                    val recordBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
+                        addTarget(previewSurf)
+                        addTarget(recorderSurface)
+                        applyCommonSettings(this)
+                        set(CaptureRequest.CONTROL_CAPTURE_INTENT, CaptureRequest.CONTROL_CAPTURE_INTENT_VIDEO_RECORD)
+                        if (matchedFpsRange != null) {
+                            set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, matchedFpsRange)
+                        }
+                        if (isVideoStabilizationEnabled) {
+                            val eisModes = chars?.get(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES) ?: intArrayOf()
+                            if (eisModes.contains(CameraCharacteristics.CONTROL_VIDEO_STABILIZATION_MODE_ON)) {
+                                set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON)
+                            }
+                        }
+                    }
+                    previewRequestBuilder = recordBuilder
+
+                    val sessionCallback = object : CameraCaptureSession.StateCallback() {
+                        override fun onConfigured(session: CameraCaptureSession) {
+                            Log.i(TAG, "[RECORDING_SESSION] Video recording session configured")
+                            captureSession = session
+                            try {
+                                session.setRepeatingRequest(recordBuilder.build(), captureCallback, backgroundHandler)
+                                if (!isSoftwareCinema) {
+                                    mediaRecorder?.start()
+                                }
+                                _isRecordingVideo.value = true
+                                startVideoTimer()
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed starting repeating request or recorder", e)
+                                cleanupFailedRecording(onError, "Failed to start recording: ${e.message}")
+                            }
+                        }
+
+                        override fun onConfigureFailed(session: CameraCaptureSession) {
+                            Log.e(TAG, "[RECORDING_SESSION] Video capture session configuration failed")
+                            cleanupFailedRecording(onError, "Camera hardware failed to configure video capture session")
+                        }
+                    }
+
+                    createRecordingCaptureSession(
+                        camera = camera,
+                        previewSurface = previewSurf,
+                        recorderSurface = recorderSurface,
+                        is10Bit = is10BitRequested || (isSoftwareCinema && cinemaCodec == CinemaCodec.PRORES),
+                        callback = sessionCallback
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to create recording capture session", e)
+                    cleanupFailedRecording(onError, "Failed to initialize recording session: ${e.message}")
+                }
+            }
 
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize video recording", e)
-            val errorDetail = getMediaCodecErrorDetail(e)
-            onError(errorDetail)
-            _isRecordingVideo.value = false
-            currentVideoUri?.let { uri ->
-                try { context.contentResolver.delete(uri, null, null) } catch (ignored: Exception) {}
-                currentVideoUri = null
-            }
-            currentRecordingTempFile?.let { f ->
-                try { f.delete() } catch (ignored: Exception) {}
-                currentRecordingTempFile = null
-            }
-            try {
-                mediaRecorder?.reset()
-                mediaRecorder?.release()
-            } catch (ignored: Exception) {}
-            mediaRecorder = null
-            restartCamera()
+            cleanupFailedRecording(onError, getMediaCodecErrorDetail(e))
         }
     }
 
@@ -3850,14 +3959,21 @@ class Camera2Engine(private val context: Context) {
             currentVideoFileName = null
             currentVideoMimeType = null
 
+            videoTimerJob?.cancel()
+            _isRecordingVideo.value = false
+
+            val activeLens = _selectedLens.value
+            val isFrontFacing = activeLens?.facing == CameraCharacteristics.LENS_FACING_FRONT
+
             if (isSoftwareCinemaRecording) {
                 isSoftwareCinemaRecording = false
-                videoTimerJob?.cancel()
-                _isRecordingVideo.value = false
-                val recordedFile = cinemaSoftwareRecorder.stopRecording()
+                val recordedFile = try {
+                    cinemaSoftwareRecorder.stopRecording()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error stopping cinema software recorder", e)
+                    null
+                }
                 currentRecordingTempFile = null
-                val activeLens = _selectedLens.value
-                val isFrontFacing = activeLens?.facing == CameraCharacteristics.LENS_FACING_FRONT
 
                 engineScope.launch(Dispatchers.IO) {
                     try {
@@ -3877,84 +3993,88 @@ class Camera2Engine(private val context: Context) {
                                     displayName = if (isCinema) "Cinema Video" else "Video",
                                     isFrontCamera = isFrontFacing
                                 )
-                                Log.i(TAG, "Cinema software video successfully saved to Gallery: size=${recordedFile.length()} bytes, uri=$savedUri")
-                            } else {
-                                Log.w(TAG, "Failed to save cinema software video to gallery")
+                                Log.i(TAG, "Cinema software video successfully saved: size=${recordedFile.length()} bytes, uri=$savedUri")
                             }
-                        } else {
-                            Log.w(TAG, "Recorded software cinema file was missing or empty (length=${recordedFile?.length() ?: 0})")
                         }
                     } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save cinema recording to MediaStore", e)
+                        Log.e(TAG, "Failed saving cinema recording", e)
                     } finally {
                         try { recordedFile?.delete() } catch (ignored: Exception) {}
                         updateStorageStats()
                     }
                 }
-                restartCamera()
-                return
-            }
-
-            videoTimerJob?.cancel()
-            _isRecordingVideo.value = false
-
-            mediaRecorder?.apply {
-                try {
-                    stop()
-                } catch (e: Exception) {
-                    Log.w(TAG, "MediaRecorder stop failed", e)
-                }
-                try { reset() } catch (ignored: Exception) {}
-                try { release() } catch (ignored: Exception) {}
-            }
-            mediaRecorder = null
-
-            videoRecordingFileDescriptor?.close()
-            videoRecordingFileDescriptor = null
-
-            val tempFile = currentRecordingTempFile
-            currentRecordingTempFile = null
-
-            val activeLens = _selectedLens.value
-            val isFrontFacing = activeLens?.facing == CameraCharacteristics.LENS_FACING_FRONT
-
-            engineScope.launch(Dispatchers.IO) {
-                try {
-                    if (tempFile != null && tempFile.exists() && tempFile.length() > 0) {
-                        val savedUri = saveVideoToGallery(
-                            tempFile = tempFile,
-                            fileName = fileName,
-                            mimeType = mimeType,
-                            isCinema = isCinema,
-                            isFrontFacing = isFrontFacing
-                        )
-                        if (savedUri != null) {
-                            _lastCapturedMedia.value = CapturedMedia(
-                                uri = savedUri,
-                                isVideo = true,
-                                timestamp = System.currentTimeMillis(),
-                                displayName = if (isCinema) "Cinema Video" else "Video",
-                                isFrontCamera = isFrontFacing
-                            )
-                            Log.i(TAG, "Hardware recorded video successfully saved to Gallery: size=${tempFile.length()} bytes, uri=$savedUri")
-                        } else {
-                            Log.w(TAG, "Failed to save hardware recorded video to gallery")
-                        }
-                    } else {
-                        Log.w(TAG, "Hardware temp recorded file was missing or empty (length=${tempFile?.length() ?: 0})")
+            } else {
+                mediaRecorder?.apply {
+                    try {
+                        stop()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "MediaRecorder stop failed", e)
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error finalizing recorded video", e)
-                } finally {
-                    try { tempFile?.delete() } catch (ignored: Exception) {}
-                    updateStorageStats()
+                    try { reset() } catch (ignored: Throwable) {}
+                    try { release() } catch (ignored: Throwable) {}
+                }
+                mediaRecorder = null
+
+                try { videoRecordingFileDescriptor?.close() } catch (ignored: Throwable) {}
+                videoRecordingFileDescriptor = null
+
+                val tempFile = currentRecordingTempFile
+                currentRecordingTempFile = null
+
+                engineScope.launch(Dispatchers.IO) {
+                    try {
+                        if (tempFile != null && tempFile.exists() && tempFile.length() > 0) {
+                            val savedUri = saveVideoToGallery(
+                                tempFile = tempFile,
+                                fileName = fileName,
+                                mimeType = mimeType,
+                                isCinema = isCinema,
+                                isFrontFacing = isFrontFacing
+                            )
+                            if (savedUri != null) {
+                                _lastCapturedMedia.value = CapturedMedia(
+                                    uri = savedUri,
+                                    isVideo = true,
+                                    timestamp = System.currentTimeMillis(),
+                                    displayName = if (isCinema) "Cinema Video" else "Video",
+                                    isFrontCamera = isFrontFacing
+                                )
+                                Log.i(TAG, "Hardware recorded video successfully saved: size=${tempFile.length()} bytes, uri=$savedUri")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error finalizing recorded video", e)
+                    } finally {
+                        try { tempFile?.delete() } catch (ignored: Throwable) {}
+                        updateStorageStats()
+                    }
                 }
             }
 
-            restartCamera()
+            // Restore the standard preview session on the same open CameraDevice
+            backgroundHandler?.post {
+                val curSession = captureSession
+                if (curSession != null) {
+                    try {
+                        curSession.stopRepeating()
+                        curSession.abortCaptures()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error stopping recording session repeating request", e)
+                    }
+                    try {
+                        curSession.close()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error closing recording session", e)
+                    }
+                    captureSession = null
+                }
+                createCameraCaptureSession()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping video recording", e)
-            restartCamera()
+            backgroundHandler?.post {
+                createCameraCaptureSession()
+            }
         }
     }
 
