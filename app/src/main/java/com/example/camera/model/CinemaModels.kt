@@ -59,10 +59,9 @@ enum class CinemaNoiseReduction(val label: String, val mode: Int) {
 data class CinemaConfig(
     val logBitDepth: LogBitDepth = LogBitDepth.BIT_10,
     val codec: CinemaCodec = CinemaCodec.H265,
-    val selectedLut: CinematicLut = CinematicLut.NONE,
-    val isLutPreviewEnabled: Boolean = false,
-    val isLutPreviewOnly: Boolean = true,
-    val isBakeLutToOutput: Boolean = false,
+    val selectedLut: CinematicLut = CinematicLut.REC_709, // Default Rec.709 as requested
+    val customLutPath: String? = null,
+    val customLutName: String? = null,
     val colorProfile: CinemaColorProfile = CinemaColorProfile.FLAT_LOG,
     val colorSpace: CinemaColorSpace = CinemaColorSpace.REC_709,
     val isRawSensorLogPipeline: Boolean = true, // Directly processes raw sensor stream into Log, bypassing destructive consumer ISP
@@ -79,15 +78,18 @@ data class CinemaConfig(
     val washedOut: Float = 0.0f, // 0.0f (pure LOG/HLG) to 1.0f (progressive reduction of washed-out appearance with contrast/saturation recovery)
     val saturation: Float = 1.0f, // 0.0f (monochrome/desaturated) to 2.0f (vibrant) via 3x3 color gamut matrix
     val sharpness: CinemaSharpness = CinemaSharpness.NATURAL,
-    val noiseReduction: CinemaNoiseReduction = CinemaNoiseReduction.MEDIUM,
+    val noiseReduction: CinemaNoiseReduction = CinemaNoiseReduction.OFF, // Default OFF on initial install; persists across restarts
     val exposureCompensation: Int = 0, // Real Camera2 EV steps (e.g. -6..+6)
     val whiteBalance: WhiteBalanceMode = WhiteBalanceMode.AUTO,
     val manualIso: Int? = null, // null for Auto, or 50, 100, 200, 400, 800, 1600, 3200
-    val manualShutterSpeedNs: Long? = null // null for Auto, or 1/24s, 1/48s (180°), 1/50s, 1/96s, 1/120s
+    val manualShutterSpeedNs: Long? = null, // null for Auto, or 1/24s, 1/48s (180°), 1/50s, 1/96s, 1/120s
+    val isBakeLutToOutput: Boolean = true, // Default true: LUT is baked to output video automatically
+    val isLutPreviewEnabled: Boolean = true // Default true: LUT preview is always active
 ) {
     val isLogMode: Boolean get() = (colorProfile != CinemaColorProfile.NATIVE) || logBitDepth != LogBitDepth.OFF
     val activeLut: CinematicLut get() = selectedLut
-    val shouldBakeLut: Boolean get() = isBakeLutToOutput && selectedLut != CinematicLut.NONE
+    val shouldBakeLut: Boolean get() = selectedLut != CinematicLut.NONE && isBakeLutToOutput
+    val isLutPreviewOnly: Boolean get() = false
 }
 
 data class CinemaHardwareCapabilities(

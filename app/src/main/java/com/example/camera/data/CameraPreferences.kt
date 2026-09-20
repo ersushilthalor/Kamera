@@ -317,11 +317,66 @@ class CameraPreferences(context: Context) {
         }
         set(value) = prefs.edit().putLong("pref_cinema_shutter", value ?: -1L).apply()
 
+    var cinemaNoiseReduction: com.example.camera.model.CinemaNoiseReduction
+        get() {
+            val name = prefs.getString("pref_cinema_noise_reduction", com.example.camera.model.CinemaNoiseReduction.OFF.name)
+                ?: com.example.camera.model.CinemaNoiseReduction.OFF.name
+            return try { com.example.camera.model.CinemaNoiseReduction.valueOf(name) } catch (e: Exception) { com.example.camera.model.CinemaNoiseReduction.OFF }
+        }
+        set(value) = prefs.edit().putString("pref_cinema_noise_reduction", value.name).apply()
+
+    var cinemaSelectedLut: com.example.camera.model.CinematicLut
+        get() {
+            val name = prefs.getString("pref_cinema_selected_lut", com.example.camera.model.CinematicLut.REC_709.name)
+                ?: com.example.camera.model.CinematicLut.REC_709.name
+            return try {
+                when (name) {
+                    "FILMIC_NEUTRAL" -> com.example.camera.model.CinematicLut.REC_709
+                    "WARM_CINEMA" -> com.example.camera.model.CinematicLut.WARM_SUNSET
+                    "COOL_DRAMATIC" -> com.example.camera.model.CinematicLut.COOL_THRILLER
+                    "HIGH_CONTRAST_CINEMA" -> com.example.camera.model.CinematicLut.BLEACH_BYPASS
+                    "SOFT_FILM" -> com.example.camera.model.CinematicLut.FUJI_ETERNA
+                    else -> com.example.camera.model.CinematicLut.valueOf(name)
+                }
+            } catch (e: Exception) {
+                com.example.camera.model.CinematicLut.REC_709
+            }
+        }
+        set(value) = prefs.edit().putString("pref_cinema_selected_lut", value.name).apply()
+
+    var cinemaCustomLutPath: String?
+        get() = prefs.getString("pref_cinema_custom_lut_path", null)
+        set(value) = prefs.edit().putString("pref_cinema_custom_lut_path", value).apply()
+
+    var cinemaCustomLutName: String?
+        get() = prefs.getString("pref_cinema_custom_lut_name", null)
+        set(value) = prefs.edit().putString("pref_cinema_custom_lut_name", value).apply()
+
+    var cinemaCodec: com.example.camera.model.CinemaCodec
+        get() {
+            val name = prefs.getString("pref_cinema_codec", com.example.camera.model.CinemaCodec.H265.name)
+                ?: com.example.camera.model.CinemaCodec.H265.name
+            return try { com.example.camera.model.CinemaCodec.valueOf(name) } catch (e: Exception) { com.example.camera.model.CinemaCodec.H265 }
+        }
+        set(value) = prefs.edit().putString("pref_cinema_codec", value.name).apply()
+
+    var cinemaExposure: Float
+        get() = prefs.getFloat("pref_cinema_exposure_slider", 0.0f)
+        set(value) = prefs.edit().putFloat("pref_cinema_exposure_slider", value).apply()
+
+    var cinemaWashedOut: Float
+        get() = prefs.getFloat("pref_cinema_washed_out", 0.0f)
+        set(value) = prefs.edit().putFloat("pref_cinema_washed_out", value).apply()
+
     fun getCinemaConfig(): com.example.camera.model.CinemaConfig {
         return com.example.camera.model.CinemaConfig(
             videoFps = cinemaFps,
             selectedResolution = com.example.camera.model.CameraResolution(cinemaWidth, cinemaHeight),
             logBitDepth = cinemaLogBitDepth,
+            codec = cinemaCodec,
+            selectedLut = cinemaSelectedLut,
+            customLutPath = cinemaCustomLutPath,
+            customLutName = cinemaCustomLutName,
             colorProfile = cinemaColorProfile,
             colorSpace = cinemaColorSpace,
             isRawSensorLogPipeline = cinemaIsRawSensorLogPipeline,
@@ -331,8 +386,11 @@ class CameraPreferences(context: Context) {
             shadows = cinemaShadows,
             highlights = cinemaHighlights,
             contrast = cinemaContrast,
+            exposure = cinemaExposure,
+            washedOut = cinemaWashedOut,
             saturation = cinemaSaturation,
             sharpness = cinemaSharpness,
+            noiseReduction = cinemaNoiseReduction,
             exposureCompensation = cinemaExposureCompensation,
             whiteBalance = cinemaWhiteBalance,
             manualIso = cinemaManualIso,
@@ -347,6 +405,10 @@ class CameraPreferences(context: Context) {
             cinemaHeight = it.height
         }
         cinemaLogBitDepth = config.logBitDepth
+        cinemaCodec = config.codec
+        cinemaSelectedLut = config.selectedLut
+        cinemaCustomLutPath = config.customLutPath
+        cinemaCustomLutName = config.customLutName
         cinemaColorProfile = config.colorProfile
         cinemaColorSpace = config.colorSpace
         cinemaIsRawSensorLogPipeline = config.isRawSensorLogPipeline
@@ -356,8 +418,11 @@ class CameraPreferences(context: Context) {
         cinemaShadows = config.shadows
         cinemaHighlights = config.highlights
         cinemaContrast = config.contrast
+        cinemaExposure = config.exposure
+        cinemaWashedOut = config.washedOut
         cinemaSaturation = config.saturation
         cinemaSharpness = config.sharpness
+        cinemaNoiseReduction = config.noiseReduction
         cinemaExposureCompensation = config.exposureCompensation
         cinemaWhiteBalance = config.whiteBalance
         cinemaManualIso = config.manualIso

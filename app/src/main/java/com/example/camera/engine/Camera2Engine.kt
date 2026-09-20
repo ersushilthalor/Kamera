@@ -234,7 +234,7 @@ class Camera2Engine(private val context: Context) {
     private val isSwitchingLens = java.util.concurrent.atomic.AtomicBoolean(false)
 
     val cinemaEngine = CinemaEngine(context)
-    private val _cinemaConfig = MutableStateFlow(cinemaEngine.config)
+    private val _cinemaConfig = MutableStateFlow(preferences.getCinemaConfig())
     val cinemaConfig: StateFlow<CinemaConfig> = _cinemaConfig.asStateFlow()
     private val _cinemaCapabilities = MutableStateFlow(cinemaEngine.capabilities)
     val cinemaCapabilities: StateFlow<CinemaHardwareCapabilities> = _cinemaCapabilities.asStateFlow()
@@ -255,9 +255,9 @@ class Camera2Engine(private val context: Context) {
     val zoomProgress: StateFlow<Float> = _zoomProgress.asStateFlow()
 
     init {
-        // ZERO hardware calls during construction/init!
-        // Background threads, camera detection, and initialization are performed lazily
-        // via safeInitializeCamera() only after CAMERA permission is confirmed.
+        val savedCinema = preferences.getCinemaConfig()
+        cinemaEngine.updateConfig(savedCinema)
+        _cinemaConfig.value = savedCinema
     }
 
     /**

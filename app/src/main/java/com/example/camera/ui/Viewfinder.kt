@@ -194,7 +194,6 @@ fun Viewfinder(
                     },
                     update = { textureView ->
                         val effectiveLut = activeLut ?: cinemaConfig?.selectedLut
-                        val effectiveLutPreview = isLutPreviewEnabled || (cinemaConfig?.isLutPreviewEnabled == true)
 
                         val colorMatrix = android.graphics.ColorMatrix()
                         var hasFilter = false
@@ -304,11 +303,13 @@ fun Viewfinder(
                                 hasFilter = true
                             }
 
-                            // 5. Cinematic LUT monitoring (active in both Preview LUT mode and Bake LUT mode)
-                            val shouldShowLut = (effectiveLutPreview || cinemaConfig.isBakeLutToOutput) &&
-                                    effectiveLut != null && effectiveLut != CinematicLut.NONE
-                            if (shouldShowLut && effectiveLut != null) {
-                                val lutMat = effectiveLut.toAndroidColorMatrix()
+                            // 5. Cinematic LUT monitoring (automatically applied whenever a LUT is active)
+                            if (effectiveLut != null && effectiveLut != CinematicLut.NONE) {
+                                val lutMat = if (effectiveLut == CinematicLut.CUSTOM && cinemaConfig.customLutPath != null) {
+                                    com.example.camera.data.CubeLutParser.getOrLoad(cinemaConfig.customLutPath)?.toAndroidColorMatrix()
+                                } else {
+                                    effectiveLut.toAndroidColorMatrix()
+                                }
                                 if (lutMat != null) {
                                     colorMatrix.postConcat(lutMat)
                                     hasFilter = true
@@ -333,26 +334,39 @@ fun Viewfinder(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Optional Non-Destructive Live LUT / Filter Monitoring Badge
+                // Clean Cinematic LUT Active Badge
                 val badgeLut = activeLut ?: cinemaConfig?.selectedLut
-                val badgeLutPreview = isLutPreviewEnabled || (cinemaConfig?.isLutPreviewEnabled == true)
-                if (cameraMode == CameraMode.CINEMA && badgeLutPreview && badgeLut != null && badgeLut != CinematicLut.NONE) {
+                if (cameraMode == CameraMode.CINEMA && badgeLut != null && badgeLut != CinematicLut.NONE) {
+                    val displayLabel = if (badgeLut == CinematicLut.CUSTOM) {
+                        cinemaConfig?.customLutName ?: badgeLut.label
+                    } else {
+                        badgeLut.label
+                    }
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopStart)
-                            .padding(8.dp)
+                            .padding(10.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xCC111318))
-                            .border(1.dp, badgeLut.accentColor.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .background(Color(0xCC0D0F18))
+                            .border(1.dp, badgeLut.accentColor.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 9.dp, vertical = 5.dp)
                     ) {
-                        Text(
-                            text = "LUT: ${badgeLut.label} (PREVIEW)",
-                            color = badgeLut.accentColor,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.5.sp
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(badgeLut.accentColor)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = displayLabel.uppercase(),
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.6.sp
+                            )
+                        }
                     }
                 } else if (cameraMode == CameraMode.PHOTO && activePhotoFilter != null && activePhotoFilter != PhotoFilter.ORIGINAL) {
                     Box(

@@ -15,6 +15,7 @@ import android.os.Build
 import android.util.Log
 import android.util.Range
 import com.example.camera.model.*
+import com.example.camera.data.CubeLutParser
 import kotlin.math.ln
 import kotlin.math.log10
 import kotlin.math.pow
@@ -61,6 +62,14 @@ class CinemaEngine(private val context: Context) {
     }
 
     fun getTonemapCurve(): TonemapCurve {
+        val currentConfig = config
+        val path = currentConfig.customLutPath
+        if (currentConfig.selectedLut == CinematicLut.CUSTOM && path != null) {
+            val custom = CubeLutParser.getOrLoad(path)
+            if (custom != null) {
+                return custom.toTonemapCurve()
+            }
+        }
         if (config.colorProfile == CinemaColorProfile.REC_2020) {
             return rec2020AutoToneEngine.getTonemapCurve()
         }
@@ -72,7 +81,7 @@ class CinemaEngine(private val context: Context) {
                 userExposure = config.exposure
             )
         }
-        val lutForIsp = if (config.shouldBakeLut) config.selectedLut else CinematicLut.NONE
+        val lutForIsp = config.selectedLut
         return generateLogTonemapCurve(
             config.colorProfile,
             config.shadows,
@@ -225,12 +234,17 @@ class CinemaEngine(private val context: Context) {
             builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_FAST)
             builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_FAST)
         } else {
-            // Only bake LUT into the hardware recording stream if "Bake LUT to Output" is active.
-            // In Preview LUT mode, keep the ISP curve and gamut pure Flat Log for mastering.
-            val lutForIsp = if (config.shouldBakeLut) config.selectedLut else CinematicLut.NONE
+            val lutForIsp = config.selectedLut
+            val customPath = config.customLutPath
+            val customCube = if (lutForIsp == CinematicLut.CUSTOM && customPath != null) {
+                CubeLutParser.getOrLoad(customPath)
+            } else null
 
             // 1. Dynamic Hardware Tonemap Curve (Log Transfer + Shadows, Highlights, Contrast, Exposure, Washed-Out + Baked LUT)
-            if (config.colorProfile == CinemaColorProfile.REC_2020) {
+            if (customCube != null && supportsContrastCurve) {
+                builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
+                builder.set(CaptureRequest.TONEMAP_CURVE, customCube.toTonemapCurve())
+            } else if (config.colorProfile == CinemaColorProfile.REC_2020) {
                 // REC.2020 Log Profile with Real-Time Auto Tone Control
                 if (supportsContrastCurve) {
                     val tonemapCurve = rec2020AutoToneEngine.getTonemapCurve()
@@ -666,13 +680,20 @@ class CinemaEngine(private val context: Context) {
                 // Blend in LUT's matrix color separation if available
                 if (lut != CinematicLut.NONE) {
                     val lutMatrix = when (lut) {
-                        CinematicLut.FILMIC_NEUTRAL -> floatArrayOf(1.08f, -0.02f, -0.01f, -0.01f, 1.05f, -0.01f, -0.02f, -0.01f, 1.06f)
-                        CinematicLut.WARM_CINEMA -> floatArrayOf(1.14f, 0.02f, -0.05f, 0.02f, 1.05f, -0.03f, -0.06f, -0.02f, 0.92f)
-                        CinematicLut.COOL_DRAMATIC -> floatArrayOf(0.92f, -0.01f, 0.02f, -0.02f, 1.02f, 0.03f, 0.02f, 0.05f, 1.16f)
-                        CinematicLut.TEAL_ORANGE -> floatArrayOf(1.20f, -0.06f, -0.08f, -0.03f, 1.07f, 0.03f, -0.10f, 0.06f, 1.22f)
+                        CinematicLut.REC_709 -> floatArrayOf(1.00f, 0.00f, 0.00f, 0.00f, 1.00f, 0.00f, 0.00f, 0.00f, 1.00f)
+                        CinematicLut.KODAK_2383 -> floatArrayOf(1.14f, 0.01f, -0.04f, 0.01f, 1.05f, -0.02f, -0.05f, -0.02f, 0.92f)
+                        CinematicLut.FUJI_ETERNA -> floatArrayOf(1.02f, 0.02f, -0.01f, 0.01f, 1.01f, -0.01f, -0.02f, 0.01f, 0.98f)
+                        CinematicLut.TEAL_ORANGE -> floatArrayOf(1.22f, -0.06f, -0.08f, -0.03f, 1.08f, 0.03f, -0.10f, 0.06f, 1.24f)
+                        CinematicLut.BLEACH_BYPASS -> floatArrayOf(1.24f, 0.01f, -0.02f, 0.01f, 1.18f, 0.01f, -0.02f, 0.02f, 1.18f)
+                        CinematicLut.WARM_SUNSET -> floatArrayOf(1.16f, 0.02f, -0.05f, 0.02f, 1.06f, -0.03f, -0.06f, -0.02f, 0.90f)
+                        CinematicLut.COOL_THRILLER -> floatArrayOf(0.92f, -0.01f, 0.02f, -0.02f, 1.02f, 0.03f, 0.02f, 0.05f, 1.18f)
                         CinematicLut.MUTED_FILM -> floatArrayOf(0.94f, 0.02f, 0.02f, 0.02f, 0.95f, 0.02f, 0.02f, 0.02f, 0.98f)
-                        CinematicLut.HIGH_CONTRAST_CINEMA -> floatArrayOf(1.22f, 0.02f, -0.02f, 0.01f, 1.18f, 0.01f, -0.02f, 0.02f, 1.20f)
-                        CinematicLut.SOFT_FILM -> floatArrayOf(1.05f, 0.03f, -0.02f, 0.02f, 1.02f, -0.01f, -0.03f, 0.01f, 0.96f)
+                        CinematicLut.CUSTOM -> config.customLutPath?.let { CubeLutParser.getOrLoad(it)?.matrix3x3 }
+                        CinematicLut.FILMIC_NEUTRAL -> floatArrayOf(1.00f, 0.00f, 0.00f, 0.00f, 1.00f, 0.00f, 0.00f, 0.00f, 1.00f)
+                        CinematicLut.WARM_CINEMA -> floatArrayOf(1.16f, 0.02f, -0.05f, 0.02f, 1.06f, -0.03f, -0.06f, -0.02f, 0.90f)
+                        CinematicLut.COOL_DRAMATIC -> floatArrayOf(0.92f, -0.01f, 0.02f, -0.02f, 1.02f, 0.03f, 0.02f, 0.05f, 1.18f)
+                        CinematicLut.HIGH_CONTRAST_CINEMA -> floatArrayOf(1.24f, 0.01f, -0.02f, 0.01f, 1.18f, 0.01f, -0.02f, 0.02f, 1.18f)
+                        CinematicLut.SOFT_FILM -> floatArrayOf(1.02f, 0.02f, -0.01f, 0.01f, 1.01f, -0.01f, -0.02f, 0.01f, 0.98f)
                         else -> null
                     }
                     if (lutMatrix != null) {
