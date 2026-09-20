@@ -32,10 +32,10 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun FrostedGlassBox(
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(24.dp),
-    elevation: Dp = 18.dp,
-    baseAlpha: Float = 0.72f,
-    baseTint: Color = Color(0xFF141724),
+    shape: Shape = RoundedCornerShape(26.dp),
+    elevation: Dp = 20.dp,
+    baseAlpha: Float = 0.80f,
+    baseTint: Color = Color(0xFF0F121C),
     borderWidth: Dp = 1.dp,
     borderColor: Color? = null,
     showTopHighlightRim: Boolean = true,
@@ -46,9 +46,9 @@ fun FrostedGlassBox(
     } else {
         Brush.verticalGradient(
             colors = listOf(
-                Color.White.copy(alpha = 0.42f),
-                Color.White.copy(alpha = 0.14f),
-                Color.White.copy(alpha = 0.05f)
+                Color.White.copy(alpha = 0.45f),
+                Color.White.copy(alpha = 0.16f),
+                Color.White.copy(alpha = 0.04f)
             )
         )
     }
@@ -59,16 +59,16 @@ fun FrostedGlassBox(
                 elevation = elevation,
                 shape = shape,
                 clip = false,
-                ambientColor = Color.Black.copy(alpha = 0.40f),
-                spotColor = Color.Black.copy(alpha = 0.70f)
+                ambientColor = Color.Black.copy(alpha = 0.45f),
+                spotColor = Color.Black.copy(alpha = 0.75f)
             )
             .clip(shape)
-            // Primary substrate: deep translucent tinted glass
+            // Primary substrate: deep translucent tinted liquid glass
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
                         baseTint.copy(alpha = baseAlpha),
-                        Color(0xFF0A0C13).copy(alpha = (baseAlpha + 0.14f).coerceAtMost(0.96f))
+                        Color(0xFF07090F).copy(alpha = (baseAlpha + 0.10f).coerceAtMost(0.96f))
                     )
                 )
             )
@@ -76,10 +76,10 @@ fun FrostedGlassBox(
             .background(
                 Brush.linearGradient(
                     colors = listOf(
-                        Color.White.copy(alpha = 0.16f),
+                        Color.White.copy(alpha = 0.14f),
                         Color.White.copy(alpha = 0.03f),
                         Color.Transparent,
-                        Color.Black.copy(alpha = 0.22f)
+                        Color.Black.copy(alpha = 0.25f)
                     )
                 )
             )
@@ -94,8 +94,8 @@ fun FrostedGlassBox(
         Box(
             modifier = Modifier
                 .matchParentSize()
-                .background(Color.Black.copy(alpha = 0.45f))
-                .blur(20.dp)
+                .background(Color(0xFF0A0D16).copy(alpha = 0.50f))
+                .blur(22.dp)
         )
 
         content()
@@ -111,8 +111,8 @@ fun FrostedGlassBox(
                         Brush.horizontalGradient(
                             colors = listOf(
                                 Color.Transparent,
-                                Color.White.copy(alpha = 0.45f),
-                                Color.White.copy(alpha = 0.15f),
+                                Color.White.copy(alpha = 0.50f),
+                                Color.White.copy(alpha = 0.18f),
                                 Color.Transparent
                             )
                         )

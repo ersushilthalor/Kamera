@@ -198,122 +198,14 @@ fun Viewfinder(
                         val colorMatrix = android.graphics.ColorMatrix()
                         var hasFilter = false
 
-                        if (cameraMode == CameraMode.CINEMA && cinemaConfig != null && cinemaConfig.logBitDepth != LogBitDepth.OFF) {
-                            // 1. Log Profile characteristic preview
-                            when (cinemaConfig.colorProfile) {
-                                CinemaColorProfile.FLAT_LOG -> {
-                                    // True Flat Log: lifted milky shadow pedestal (+32 offset) and low contrast
-                                    val flatPedestal = android.graphics.ColorMatrix(floatArrayOf(
-                                        0.86f, 0f, 0f, 0f, 32f,
-                                        0f, 0.86f, 0f, 0f, 32f,
-                                        0f, 0f, 0.86f, 0f, 32f,
-                                        0f, 0f, 0f, 1f, 0f
-                                    ))
-                                    colorMatrix.postConcat(flatPedestal)
-                                    hasFilter = true
-                                }
-                                CinemaColorProfile.HLG -> {
-                                    // HLG: vibrant preserved realistic colors
-                                    val hlgSat = android.graphics.ColorMatrix()
-                                    hlgSat.setSaturation(1.22f)
-                                    colorMatrix.postConcat(hlgSat)
-                                    hasFilter = true
-                                }
-                                CinemaColorProfile.REC_2020 -> {
-                                    // REC.2020 Real-Time Auto Tone Control:
-                                    // Continuous real-time Exposure, Highlight roll-off shoulder, Shadow toe lift, Contrast & Inky Black Pedestal
-                                    // Calibrated preview matrix guarantees true neutral whites, zero pink/red artifacts, and rich flagship color depth
-                                    val p = rec2020AutoToneParams ?: com.example.camera.engine.Rec2020AutoToneParams()
-                                    val rec2020Matrix = com.example.camera.engine.Rec2020AutoToneEngine.computePreviewColorMatrix(p)
-                                    colorMatrix.postConcat(rec2020Matrix)
-                                    hasFilter = true
-                                }
-                                CinemaColorProfile.APPLE_LOG_2 -> {
-                                    // Apple Log 2: Technical logarithmic transfer curve with elevated black pedestal (+38.4f offset),
-                                    // extended highlight latitude, smooth parabolic shadow roll-off, and grading-friendly profile
-                                    val appleLogPedestal = android.graphics.ColorMatrix(floatArrayOf(
-                                        0.72f, 0f, 0f, 0f, 38.4f,
-                                        0f, 0.72f, 0f, 0f, 38.4f,
-                                        0f, 0f, 0.72f, 0f, 38.4f,
-                                        0f, 0f, 0f, 1f, 0f
-                                    ))
-                                    val logSat = android.graphics.ColorMatrix()
-                                    logSat.setSaturation(0.88f)
-                                    appleLogPedestal.postConcat(logSat)
-                                    colorMatrix.postConcat(appleLogPedestal)
-                                    hasFilter = true
-                                }
-                                CinemaColorProfile.NATIVE -> {
-                                    // Native: standard unadjusted natural camera profile
-                                }
-                                else -> {}
-                            }
-
-                            // For non-REC_2020 profiles, apply manual user sliders
-                            if (cinemaConfig.colorProfile != CinemaColorProfile.REC_2020) {
-                                // 2. Washed Out Reduction (recovers deep blacks & midtone contrast from flat profiles)
-                                if (cinemaConfig.washedOut > 0.0f) {
-                                    val w = cinemaConfig.washedOut
-                                    val pedestalReduction = -28f * w
-                                    val contrastBoost = 1.0f + (w * 0.25f)
-                                    val t = (1.0f - contrastBoost) * 128f + pedestalReduction
-                                    val washedOutMatrix = android.graphics.ColorMatrix(floatArrayOf(
-                                        contrastBoost, 0f, 0f, 0f, t,
-                                        0f, contrastBoost, 0f, 0f, t,
-                                        0f, 0f, contrastBoost, 0f, t,
-                                        0f, 0f, 0f, 1f, 0f
-                                    ))
-                                    colorMatrix.postConcat(washedOutMatrix)
-                                    hasFilter = true
-                                }
-
-                                // 3. Real-time Exposure control (+/-) on viewfinder
-                                if (cinemaConfig.exposure != 0.0f) {
-                                    val expMultiplier = 2.0f.pow(cinemaConfig.exposure * 0.75f)
-                                    val expMatrix = android.graphics.ColorMatrix(floatArrayOf(
-                                        expMultiplier, 0f, 0f, 0f, 0f,
-                                        0f, expMultiplier, 0f, 0f, 0f,
-                                        0f, 0f, expMultiplier, 0f, 0f,
-                                        0f, 0f, 0f, 1f, 0f
-                                    ))
-                                    colorMatrix.postConcat(expMatrix)
-                                    hasFilter = true
-                                }
-
-                                // 4. User Contrast control (+/-)
-                                if (cinemaConfig.contrast != 0.0f) {
-                                    val c = 1.0f + (cinemaConfig.contrast * 0.4f)
-                                    val t = (1.0f - c) * 128f
-                                    val contrastMatrix = android.graphics.ColorMatrix(floatArrayOf(
-                                        c, 0f, 0f, 0f, t,
-                                        0f, c, 0f, 0f, t,
-                                        0f, 0f, c, 0f, t,
-                                        0f, 0f, 0f, 1f, 0f
-                                    ))
-                                    colorMatrix.postConcat(contrastMatrix)
-                                    hasFilter = true
-                                }
-                            }
-
-                            // User Saturation control (+/-)
-                            if (cinemaConfig.saturation != 1.0f) {
-                                val satMatrix = android.graphics.ColorMatrix()
-                                satMatrix.setSaturation(cinemaConfig.saturation)
-                                colorMatrix.postConcat(satMatrix)
+                        if (cameraMode == CameraMode.CINEMA && cinemaConfig != null) {
+                            val cinemaMatrix = com.example.camera.engine.CinemaColorPipeline.computeCinemaColorMatrix(
+                                config = cinemaConfig,
+                                rec2020Params = rec2020AutoToneParams
+                            )
+                            if (cinemaMatrix != null) {
+                                colorMatrix.postConcat(cinemaMatrix)
                                 hasFilter = true
-                            }
-
-                            // 5. Cinematic LUT monitoring (automatically applied whenever a LUT is active)
-                            if (effectiveLut != null && effectiveLut != CinematicLut.NONE) {
-                                val lutMat = if (effectiveLut == CinematicLut.CUSTOM && cinemaConfig.customLutPath != null) {
-                                    com.example.camera.data.CubeLutParser.getOrLoad(cinemaConfig.customLutPath)?.toAndroidColorMatrix()
-                                } else {
-                                    effectiveLut.toAndroidColorMatrix()
-                                }
-                                if (lutMat != null) {
-                                    colorMatrix.postConcat(lutMat)
-                                    hasFilter = true
-                                }
                             }
                         } else if (cameraMode == CameraMode.PHOTO && activePhotoFilter != null && activePhotoFilter != PhotoFilter.ORIGINAL) {
                             val filterMat = activePhotoFilter.toAndroidColorMatrix()

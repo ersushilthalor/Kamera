@@ -234,17 +234,13 @@ class CinemaEngine(private val context: Context) {
             builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_FAST)
             builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_FAST)
         } else {
-            val lutForIsp = config.selectedLut
-            val customPath = config.customLutPath
-            val customCube = if (lutForIsp == CinematicLut.CUSTOM && customPath != null) {
-                CubeLutParser.getOrLoad(customPath)
-            } else null
+            // Camera2 sensor captures the base sensor characteristic curve (Log/Rec.2020/Natural).
+            // The LUT transform is handled with 100% visual parity in CinemaColorPipeline (viewfinder + export),
+            // preventing double-LUT application or destructive sensor clipping.
+            val lutForIsp = CinematicLut.NONE
 
-            // 1. Dynamic Hardware Tonemap Curve (Log Transfer + Shadows, Highlights, Contrast, Exposure, Washed-Out + Baked LUT)
-            if (customCube != null && supportsContrastCurve) {
-                builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
-                builder.set(CaptureRequest.TONEMAP_CURVE, customCube.toTonemapCurve())
-            } else if (config.colorProfile == CinemaColorProfile.REC_2020) {
+            // 1. Dynamic Hardware Tonemap Curve (Log Transfer + Shadows, Highlights, Contrast, Exposure, Washed-Out)
+            if (config.colorProfile == CinemaColorProfile.REC_2020) {
                 // REC.2020 Log Profile with Real-Time Auto Tone Control
                 if (supportsContrastCurve) {
                     val tonemapCurve = rec2020AutoToneEngine.getTonemapCurve()

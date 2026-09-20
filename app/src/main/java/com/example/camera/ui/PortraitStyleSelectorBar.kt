@@ -9,10 +9,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.FaceRetouchingNatural
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.FaceRetouchingNatural
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -34,21 +33,22 @@ fun PortraitStyleSelectorBar(
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val portraitAccent = Color(0xFFFF8A65) // Warm amber/coral
+    val portraitAccent = Color(0xFFFFD54F) // Master camera gold accent
 
     FrostedGlassBox(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp)
+            .padding(horizontal = 14.dp, vertical = 6.dp)
             .testTag("portrait_style_selector_bar"),
-        shape = RoundedCornerShape(20.dp),
-        borderWidth = 1.dp,
-        borderColor = portraitAccent.copy(alpha = 0.35f)
+        shape = RoundedCornerShape(26.dp),
+        elevation = 20.dp,
+        baseAlpha = 0.82f,
+        baseTint = Color(0xFF0F121C)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 10.dp, horizontal = 14.dp)
+                .padding(horizontal = 18.dp, vertical = 14.dp)
         ) {
             // Header
             Row(
@@ -57,58 +57,77 @@ fun PortraitStyleSelectorBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.FaceRetouchingNatural,
-                        contentDescription = "Portrait Style",
-                        tint = portraitAccent,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "PORTRAIT STYLES",
-                        color = portraitAccent,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = 0.8.sp
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(portraitAccent)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "• ${selectedStyle.displayName}",
-                        color = Color.White.copy(alpha = 0.85f),
+                        text = "PORTRAIT",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 2.sp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "STYLES",
+                        color = portraitAccent,
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
                     )
                 }
 
-                IconButton(
-                    onClick = onClose,
-                    modifier = Modifier.size(24.dp).testTag("close_portrait_style_bar")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close style bar",
-                        tint = Color.White.copy(alpha = 0.7f),
-                        modifier = Modifier.size(16.dp)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(portraitAccent.copy(alpha = 0.15f))
+                            .border(1.dp, portraitAccent.copy(alpha = 0.40f), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = selectedStyle.displayName,
+                            color = portraitAccent,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.08f))
+                            .clickable { onClose() }
+                            .testTag("close_portrait_style_bar"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Close,
+                            contentDescription = "Close style bar",
+                            tint = Color.White.copy(alpha = 0.85f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = selectedStyle.description,
-                color = Color.White.copy(alpha = 0.65f),
-                fontSize = 10.sp,
-                maxLines = 1
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             // Style Pills Horizontal Scroll
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 PortraitStyle.entries.forEach { style ->
                     val isSelected = selectedStyle == style
@@ -120,34 +139,35 @@ fun PortraitStyleSelectorBar(
                                 if (isSelected) {
                                     Brush.verticalGradient(
                                         colors = listOf(
-                                            portraitAccent.copy(alpha = 0.95f),
-                                            portraitAccent.copy(alpha = 0.80f)
+                                            portraitAccent.copy(alpha = 0.25f),
+                                            portraitAccent.copy(alpha = 0.10f)
                                         )
                                     )
                                 } else {
                                     Brush.verticalGradient(
                                         colors = listOf(
-                                            Color(0xFF242020).copy(alpha = 0.85f),
-                                            Color(0xFF1C1818).copy(alpha = 0.90f)
+                                            Color.White.copy(alpha = 0.06f),
+                                            Color.White.copy(alpha = 0.02f)
                                         )
                                     )
                                 }
                             )
                             .border(
-                                width = 1.dp,
-                                color = if (isSelected) Color.White.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.12f),
+                                width = if (isSelected) 1.5.dp else 1.dp,
+                                color = if (isSelected) portraitAccent else Color.White.copy(alpha = 0.12f),
                                 shape = RoundedCornerShape(12.dp)
                             )
                             .clickable { onStyleSelected(style) }
-                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                            .padding(horizontal = 14.dp, vertical = 9.dp)
                             .testTag("style_option_${style.name.lowercase()}"),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = style.displayName,
-                            color = if (isSelected) Color.Black else Color.White.copy(alpha = 0.90f),
-                            fontSize = 11.5.sp,
-                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.SemiBold
+                            color = if (isSelected) portraitAccent else Color.White.copy(alpha = 0.85f),
+                            fontSize = 12.5.sp,
+                            fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
+                            letterSpacing = 0.3.sp
                         )
                     }
                 }

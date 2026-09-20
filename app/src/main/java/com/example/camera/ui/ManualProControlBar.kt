@@ -70,11 +70,12 @@ fun ManualProControlBar(
         FrostedGlassBox(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .padding(horizontal = 14.dp, vertical = 6.dp)
                 .testTag("manual_pro_bar"),
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(26.dp),
             elevation = 20.dp,
-            baseAlpha = 0.74f
+            baseAlpha = 0.82f,
+            baseTint = Color(0xFF0F121C)
         ) {
             Column(
                 modifier = Modifier.padding(vertical = 12.dp)

@@ -27,12 +27,10 @@ import java.nio.FloatBuffer
  * Mirrors front-camera MP4 videos horizontally while preserving full frame rate,
  * bit rate, resolution, color space, and original uncompressed audio fidelity.
  */
-class VideoMirrorTranscoder {
+object VideoMirrorTranscoder {
 
-    companion object {
-        private const val TAG = "VideoMirrorTranscoder"
-        private const val TIMEOUT_USEC = 10000L
-    }
+    private const val TAG = "VideoMirrorTranscoder"
+    private const val TIMEOUT_USEC = 10000L
 
     /**
      * Transcodes video from inputFile to outputFile with optional horizontal mirroring
@@ -108,19 +106,23 @@ class VideoMirrorTranscoder {
             muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             muxer.setOrientationHint(rotation)
 
+            val targetEncoderMime = try {
+                val testCodec = MediaCodec.createEncoderByType(videoMime)
+                testCodec.release()
+                videoMime
+            } catch (e: Exception) {
+                MediaFormat.MIMETYPE_VIDEO_AVC
+            }
+
             // Configure encoder
-            val encFormat = MediaFormat.createVideoFormat(videoMime, width, height).apply {
+            val encFormat = MediaFormat.createVideoFormat(targetEncoderMime, width, height).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
                 setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
                 setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
             }
 
-            encoder = try {
-                MediaCodec.createEncoderByType(videoMime)
-            } catch (e: Exception) {
-                MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-            }
+            encoder = MediaCodec.createEncoderByType(targetEncoderMime)
             encoder.configure(encFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             val inputSurface = encoder.createInputSurface()
             encoder.start()
@@ -447,16 +449,23 @@ class VideoMirrorTranscoder {
 
         fun awaitNewImage() {
             synchronized(frameSyncObject) {
-                while (!frameAvailable) {
+                val deadline = System.currentTimeMillis() + 1000L
+                while (!frameAvailable && System.currentTimeMillis() < deadline) {
                     try {
-                        frameSyncObject.wait(500)
+                        frameSyncObject.wait(100)
+                    } catch (ignored: InterruptedException) {
                         break
-                    } catch (ignored: InterruptedException) {}
+                    }
+                }
+                if (!frameAvailable) {
+                    return
                 }
                 frameAvailable = false
             }
-            surfaceTexture.updateTexImage()
-            surfaceTexture.getTransformMatrix(stMatrix)
+            try {
+                surfaceTexture.updateTexImage()
+                surfaceTexture.getTransformMatrix(stMatrix)
+            } catch (ignored: Throwable) {}
         }
 
         fun drawImage(isMirrored: Boolean, colorMatrix: FloatArray? = null) {

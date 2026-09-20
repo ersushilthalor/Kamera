@@ -1,5 +1,6 @@
 package com.example.camera.ui
 
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,11 +10,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,6 +25,13 @@ import androidx.compose.ui.unit.sp
 import com.example.camera.model.PhotoFilter
 import com.example.camera.ui.components.FrostedGlassBox
 
+/**
+ * Liquid Glass Floating Photo Filter & Looks Window
+ * Consistent with Cinema Mode Liquid Glass styling:
+ * - Translucent glass background with specular sheen
+ * - Rounded corners (26.dp) and natural depth elevation
+ * - Modern, clean photographic looks and film emulation selector
+ */
 @Composable
 fun PhotoFilterSelectorBar(
     selectedFilter: PhotoFilter,
@@ -34,75 +39,113 @@ fun PhotoFilterSelectorBar(
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val accentColor = Color(0xFF64FFDA) // Emerald / Mint photo look accent
+
     FrostedGlassBox(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp)
+            .padding(horizontal = 14.dp, vertical = 6.dp)
             .testTag("photo_filter_selector_bar"),
-        shape = RoundedCornerShape(20.dp),
-        borderWidth = 1.dp,
-        borderColor = Color(0xFF64FFDA).copy(alpha = 0.35f)
+        shape = RoundedCornerShape(26.dp),
+        elevation = 20.dp,
+        baseAlpha = 0.82f,
+        baseTint = Color(0xFF0F121C)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 10.dp, horizontal = 14.dp)
+                .padding(horizontal = 18.dp, vertical = 14.dp)
         ) {
-            // Header
+            // Header: Title, accent dot & circular close button
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = "Photo Filters",
-                        tint = Color(0xFF64FFDA),
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "FILTERS & LOOKS",
-                        color = Color(0xFF64FFDA),
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = 0.8.sp
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(accentColor)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "• ${selectedFilter.displayName}",
-                        color = Color.White.copy(alpha = 0.85f),
+                        text = "PHOTO",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 2.sp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "LOOKS",
+                        color = accentColor,
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
                     )
                 }
 
-                IconButton(
-                    onClick = onClose,
-                    modifier = Modifier.size(24.dp).testTag("close_photo_filter_bar")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close filter bar",
-                        tint = Color.White.copy(alpha = 0.7f),
-                        modifier = Modifier.size(16.dp)
-                    )
+                    // Active filter badge
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(accentColor.copy(alpha = 0.15f))
+                            .border(1.dp, accentColor.copy(alpha = 0.40f), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = selectedFilter.displayName,
+                            color = accentColor,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.08f))
+                            .clickable { onClose() }
+                            .testTag("close_photo_filter_bar"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Close,
+                            contentDescription = "Close Photo Filter Bar",
+                            tint = Color.White.copy(alpha = 0.85f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
 
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Section: Photographic Looks & Film Emulations
+            PhotoSectionHeader(
+                title = "FILM & COLOR PROFILES",
+                badge = selectedFilter.displayName
+            )
+
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Filter Pills Horizontal Scroll
+            // Horizontal Scroll of Liquid Glass Look Chips
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 PhotoFilter.entries.forEach { filter ->
                     val isSelected = selectedFilter == filter
-                    val accentColor = Color(0xFF64FFDA)
 
                     Box(
                         modifier = Modifier
@@ -111,38 +154,78 @@ fun PhotoFilterSelectorBar(
                                 if (isSelected) {
                                     Brush.verticalGradient(
                                         colors = listOf(
-                                            accentColor.copy(alpha = 0.95f),
-                                            accentColor.copy(alpha = 0.80f)
+                                            accentColor.copy(alpha = 0.25f),
+                                            accentColor.copy(alpha = 0.10f)
                                         )
                                     )
                                 } else {
                                     Brush.verticalGradient(
                                         colors = listOf(
-                                            Color(0xFF22242C).copy(alpha = 0.85f),
-                                            Color(0xFF181A22).copy(alpha = 0.90f)
+                                            Color.White.copy(alpha = 0.06f),
+                                            Color.White.copy(alpha = 0.02f)
                                         )
                                     )
                                 }
                             )
                             .border(
-                                width = 1.dp,
-                                color = if (isSelected) Color.White.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.12f),
+                                width = if (isSelected) 1.5.dp else 1.dp,
+                                color = if (isSelected) accentColor else Color.White.copy(alpha = 0.12f),
                                 shape = RoundedCornerShape(12.dp)
                             )
                             .clickable { onFilterSelected(filter) }
-                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                            .padding(horizontal = 14.dp, vertical = 9.dp)
                             .testTag("filter_option_${filter.name.lowercase()}"),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = filter.displayName,
-                            color = if (isSelected) Color.Black else Color.White.copy(alpha = 0.90f),
-                            fontSize = 11.5.sp,
-                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.SemiBold
+                            color = if (isSelected) accentColor else Color.White.copy(alpha = 0.85f),
+                            fontSize = 12.5.sp,
+                            fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
+                            letterSpacing = 0.3.sp
                         )
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun PhotoSectionHeader(
+    title: String,
+    badge: String? = null
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height(11.dp)
+                    .clip(RoundedCornerShape(1.5.dp))
+                    .background(Color(0xFF64FFDA))
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = title,
+                color = Color.White.copy(alpha = 0.85f),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 1.sp
+            )
+        }
+
+        if (badge != null) {
+            Text(
+                text = badge,
+                color = Color(0xFF64FFDA),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold
+            )
         }
     }
 }

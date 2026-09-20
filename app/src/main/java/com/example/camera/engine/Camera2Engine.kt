@@ -4265,6 +4265,46 @@ class Camera2Engine(private val context: Context) {
             return@withContext null
         }
 
+        // Color Processing & Export Pipeline:
+        // Apply Cinema LUT / Color Profile transform and front camera mirroring to final recorded video
+        val cinemaColorMatrix = if (isCinema) {
+            CinemaColorPipeline.computeCinemaColorMatrix(
+                config = cinemaEngine.config,
+                rec2020Params = rec2020AutoToneParams.value
+            )
+        } else null
+
+        val needsColorGrade = cinemaColorMatrix != null
+        val needsMirror = isFrontFacing
+        val needsExportPipeline = needsColorGrade || needsMirror
+
+        var exportedFile: File? = null
+        val fileToSave: File = if (needsExportPipeline) {
+            val targetExport = File(context.cacheDir, "EXPORT_${System.currentTimeMillis()}_${tempFile.name}")
+            val success = try {
+                VideoMirrorTranscoder.transcodeVideo(
+                    inputFile = tempFile,
+                    outputFile = targetExport,
+                    isMirrored = needsMirror,
+                    colorMatrix = cinemaColorMatrix?.array
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Video export transcoding failed", e)
+                false
+            }
+            if (success && targetExport.exists() && targetExport.length() > 0L) {
+                Log.i(TAG, "Successfully processed video export (LUT/Grade/Mirror): size=${targetExport.length()} bytes")
+                exportedFile = targetExport
+                targetExport
+            } else {
+                Log.w(TAG, "Video export pipeline failed; falling back to original recorded file")
+                try { targetExport.delete() } catch (ignored: Exception) {}
+                tempFile
+            }
+        } else {
+            tempFile
+        }
+
         val resolver = context.contentResolver
         val contentValues = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
@@ -4304,7 +4344,7 @@ class Camera2Engine(private val context: Context) {
             targetUri = resolver.insert(collection, contentValues)
             if (targetUri != null) {
                 resolver.openOutputStream(targetUri, "w")?.use { out ->
-                    tempFile.inputStream().use { input ->
+                    fileToSave.inputStream().use { input ->
                         input.copyTo(out)
                     }
                     out.flush()
@@ -4312,14 +4352,14 @@ class Camera2Engine(private val context: Context) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val updateValues = ContentValues().apply {
                         put(MediaStore.Video.Media.IS_PENDING, 0)
-                        put(MediaStore.Video.Media.SIZE, tempFile.length())
+                        put(MediaStore.Video.Media.SIZE, fileToSave.length())
                     }
                     resolver.update(targetUri, updateValues, null, null)
                 }
 
                 MediaScannerConnection.scanFile(
                     context,
-                    arrayOf(tempFile.absolutePath),
+                    arrayOf(fileToSave.absolutePath),
                     arrayOf(mimeType)
                 ) { _, scannedUri ->
                     Log.d(TAG, "Video scanned into MediaStore: $scannedUri")
@@ -4331,6 +4371,10 @@ class Camera2Engine(private val context: Context) {
             if (targetUri != null) {
                 try { resolver.delete(targetUri, null, null) } catch (ignored: Exception) {}
             }
+        } finally {
+            if (exportedFile != null) {
+                try { exportedFile.delete() } catch (ignored: Exception) {}
+            }
         }
 
         // Direct DCIM/Camera fallback
@@ -4340,7 +4384,7 @@ class Camera2Engine(private val context: Context) {
                 "Camera"
             ).apply { if (!exists()) mkdirs() }
             val targetFile = File(dcimDir, fileName)
-            tempFile.copyTo(targetFile, overwrite = true)
+            fileToSave.copyTo(targetFile, overwrite = true)
 
             var scannedUri: Uri? = null
             MediaScannerConnection.scanFile(
