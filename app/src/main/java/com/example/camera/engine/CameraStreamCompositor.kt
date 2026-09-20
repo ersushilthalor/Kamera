@@ -334,6 +334,13 @@ class CameraStreamCompositor {
         }
     }
 
+    fun setDefaultBufferSize(width: Int, height: Int) {
+        glHandler?.post {
+            mainCameraSurfaceTexture?.setDefaultBufferSize(width, height)
+            ultraWideCameraSurfaceTexture?.setDefaultBufferSize(width, height)
+        }
+    }
+
     // -----------------------------------------------------------------------------------------
     // Target Surface Management (Viewfinder & Little Preview)
     // -----------------------------------------------------------------------------------------

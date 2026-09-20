@@ -973,7 +973,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setZoom(zoom: Float, isPresetTap: Boolean = false) {
-        val hasRealUltraWide = engine.availableLenses.value.any { it.lensType == LensType.ULTRAWIDE && it.isPhysical }
+        val hasRealUltraWide = engine.availableLenses.value.any { it.lensType == LensType.ULTRAWIDE || it.baseZoomRatio < 0.9f }
         val minZoom = if (hasRealUltraWide) 0.5f else 1.0f
         val clamped = zoom.coerceIn(minZoom, 10.0f)
         _currentZoom.value = clamped

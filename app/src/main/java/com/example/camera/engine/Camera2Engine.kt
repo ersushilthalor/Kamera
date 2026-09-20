@@ -858,13 +858,22 @@ class Camera2Engine(private val context: Context) {
     /**
      * Switch active lens
      */
-    fun selectLens(lens: LensInfo) {
+    fun selectLens(lens: LensInfo, preserveZoom: Boolean = false, targetZoom: Float? = null) {
         val previousLens = _selectedLens.value
         _selectedLens.value = lens
-        currentZoom = lens.baseZoomRatio
-        _currentZoom.value = lens.baseZoomRatio
-        preferences.saveLastLens(lens)
-        preferences.currentZoom = lens.baseZoomRatio
+
+        if (preserveZoom) {
+            val z = targetZoom ?: currentZoom
+            currentZoom = z
+            _currentZoom.value = z
+            preferences.saveLastLens(lens)
+            preferences.currentZoom = z
+        } else {
+            currentZoom = lens.baseZoomRatio
+            _currentZoom.value = lens.baseZoomRatio
+            preferences.saveLastLens(lens)
+            preferences.currentZoom = lens.baseZoomRatio
+        }
 
         // If same camera ID and same facing, update optical zoom/crop dynamically without restarting hardware
         if (previousLens?.cameraId == lens.cameraId &&
@@ -877,7 +886,32 @@ class Camera2Engine(private val context: Context) {
 
         val switchStartNs = System.nanoTime()
 
-        // Fast Handover if target camera was warm in background (non-concurrent HAL):
+        // 1. Instant Concurrent Switch if target camera session is already streaming in standby
+        if (motorolaSwitchEngine.isConcurrentSessionReady(lens) && !_isRecordingVideo.value) {
+            val bundle = motorolaSwitchEngine.switchConcurrentLens(
+                targetLens = lens,
+                currentDevice = cameraDevice,
+                currentSession = captureSession,
+                currentJpegReader = imageReaderJpeg,
+                currentYuvReader = imageReaderYuv,
+                currentLens = previousLens,
+                switchStartNs = switchStartNs
+            )
+            if (bundle != null) {
+                cameraDevice = bundle.cameraDevice
+                captureSession = bundle.captureSession
+                imageReaderJpeg = bundle.imageReaderJpeg
+                imageReaderYuv = bundle.imageReaderYuv
+                _isCameraReady.value = true
+                inspectCapabilities(lens.cameraId)
+                updatePreviewSettings()
+                val elapsedMs = (System.nanoTime() - switchStartNs) / 1_000_000L
+                Log.i(TAG, "[INSTANT CONCURRENT SWITCH] Switched to ${lens.lensType} in ${elapsedMs}ms (0 sessions recreated)")
+                return
+            }
+        }
+
+        // 2. Fast Handover if target camera was warm in background (non-concurrent HAL):
         // Only use warm handover if NOT recording video, because warm camera session doesn't have recorderSurface
         val warmDevice = motorolaSwitchEngine.handoffBackgroundCamera(lens)
         if (warmDevice != null && !_isRecordingVideo.value) {
@@ -1112,8 +1146,13 @@ class Camera2Engine(private val context: Context) {
             val optimalSize = _previewBufferSize.value ?: Size(1920, 1080)
             texture.setDefaultBufferSize(optimalSize.width, optimalSize.height)
             if (previewSurface == null || !previewSurface!!.isValid) {
+                try { previewSurface?.release() } catch (ignored: Throwable) {}
                 previewSurface = Surface(texture)
             }
+            motorolaSwitchEngine.compositor.setDefaultBufferSize(optimalSize.width, optimalSize.height)
+            motorolaSwitchEngine.compositor.setMainViewfinderSurface(previewSurface, optimalSize.width, optimalSize.height)
+            motorolaSwitchEngine.compositor.switchActiveStream(_selectedLens.value?.lensType ?: LensType.WIDE)
+
             if (prevTexture != texture || cameraDevice == null) {
                 if (_isCameraInitialized.value) {
                     startCamera()
@@ -1122,6 +1161,7 @@ class Camera2Engine(private val context: Context) {
                 reconfigureSession()
             }
         } else {
+            motorolaSwitchEngine.compositor.setMainViewfinderSurface(null, 0, 0)
             closeCamera()
         }
     }
@@ -1195,6 +1235,11 @@ class Camera2Engine(private val context: Context) {
                 } catch (ignored: Throwable) {}
                 previewSurface = Surface(texture)
             }
+
+            motorolaSwitchEngine.compositor.setDefaultBufferSize(optimalPreviewSize.width, optimalPreviewSize.height)
+            motorolaSwitchEngine.compositor.setMainViewfinderSurface(previewSurface, optimalPreviewSize.width, optimalPreviewSize.height)
+            motorolaSwitchEngine.compositor.switchActiveStream(lens.lensType)
+            motorolaSwitchEngine.compositor.awaitInitialized(200)
 
             // Setup ImageReader for Photo mode
             setupImageReaders(lens.cameraId)
@@ -1332,7 +1377,18 @@ class Camera2Engine(private val context: Context) {
 
     private fun createCameraCaptureSession() {
         val camera = cameraDevice ?: return
-        val previewSurf = previewSurface ?: return
+        val activeLens = _selectedLens.value
+        val isUltraWide = activeLens?.lensType == LensType.ULTRAWIDE
+        val compositorSurf = if (isUltraWide) {
+            motorolaSwitchEngine.compositor.ultraWideCameraSurface
+        } else {
+            motorolaSwitchEngine.compositor.mainCameraSurface
+        }
+        val previewSurf = if (compositorSurf != null && compositorSurf.isValid) {
+            compositorSurf
+        } else {
+            previewSurface ?: return
+        }
 
         isConfiguringSession = true
         _isCameraReady.value = false
@@ -1381,8 +1437,6 @@ class Camera2Engine(private val context: Context) {
                 Log.e(TAG, "Error configuring video recording capture session during lens switch", e)
             }
         }
-
-        val activeLens = _selectedLens.value
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
             activeLens?.physicalCameraId != null &&
@@ -1902,12 +1956,32 @@ class Camera2Engine(private val context: Context) {
 
         try {
             val chars = getCharacteristics(lens.cameraId) ?: return
-            // On Android 11+ (API 30+), CONTROL_ZOOM_RATIO natively switches between physical sensors
-            // (e.g. 0.5x Ultra-Wide, 1.0x Main Wide, 3.0x Telephoto) and applies smooth optical/digital scaling
+            val isUltraWide = lens.lensType == LensType.ULTRAWIDE || lens.baseZoomRatio < 0.9f
+
+            // Formula: ultraWideDigitalZoom = requestedZoom / 0.5f
+            // 0.5x = full ultra-wide sensor (1.0x digital zoom)
+            // 0.6x = ultra-wide + 1.2x digital crop
+            // 0.7x = ultra-wide + 1.4x digital crop
+            // 0.8x = ultra-wide + 1.6x digital crop
+            // 0.9x = ultra-wide + 1.8x digital crop
+            // 1.0x = ultra-wide + 2.0x digital crop
+            val targetDigitalZoom = if (isUltraWide) {
+                val base = if (lens.baseZoomRatio > 0.1f) lens.baseZoomRatio else 0.5f
+                (currentZoom / base).coerceAtLeast(1.0f)
+            } else {
+                val baseRatio = if (lens.baseZoomRatio > 0f) lens.baseZoomRatio else 1.0f
+                if (lens.isPhysical && baseRatio > 1.2f) {
+                    (currentZoom / baseRatio).coerceAtLeast(1.0f)
+                } else {
+                    currentZoom.coerceAtLeast(1.0f)
+                }
+            }
+
+            // On Android 11+ (API 30+), CONTROL_ZOOM_RATIO applies ISP digital zoom
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 val zoomRange = chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
                 if (zoomRange != null) {
-                    val clamped = currentZoom.coerceIn(zoomRange.lower, zoomRange.upper)
+                    val clamped = targetDigitalZoom.coerceIn(zoomRange.lower, zoomRange.upper)
                     builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, clamped)
                     return
                 }
@@ -1916,12 +1990,7 @@ class Camera2Engine(private val context: Context) {
             // Fallback for legacy devices or SCALER_CROP_REGION
             val sensorRect = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
             val maxZoom = chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1.0f
-            val baseRatio = if (lens.baseZoomRatio > 0f) lens.baseZoomRatio else 1.0f
-            val effectiveZoom = if (lens.isPhysical && baseRatio > 1.2f) {
-                (currentZoom / baseRatio).coerceIn(1.0f, maxZoom)
-            } else {
-                currentZoom.coerceIn(1.0f, maxZoom)
-            }
+            val effectiveZoom = targetDigitalZoom.coerceIn(1.0f, maxZoom)
 
             val cropW = (sensorRect.width() / effectiveZoom).toInt()
             val cropH = (sensorRect.height() / effectiveZoom).toInt()
@@ -1980,58 +2049,74 @@ class Camera2Engine(private val context: Context) {
             return
         }
 
-        // Identify target hardware lens for current zoom level:
+        // Keep standby camera repeating request synchronized with target zoom
+        motorolaSwitchEngine.updateStandbyZoom(clampedZoom)
+
         val backLenses = _availableLenses.value.filter { it.facing == CameraCharacteristics.LENS_FACING_BACK }
-        val targetLens: LensInfo? = when {
-            clampedZoom < 1.0f -> {
-                // Target is 0.5x Ultra Wide (< 1.0x) - physical hardware lens
-                backLenses.firstOrNull { it.lensType == LensType.ULTRAWIDE && it.isPhysical }
-                    ?: backLenses.firstOrNull { it.lensType == LensType.ULTRAWIDE }
+        val ultraWideLens = backLenses.firstOrNull { it.lensType == LensType.ULTRAWIDE && it.isPhysical }
+            ?: backLenses.firstOrNull { it.lensType == LensType.ULTRAWIDE }
+        val mainWideLens = backLenses.firstOrNull { it.lensType == LensType.WIDE && !it.isZoomPreset }
+            ?: backLenses.firstOrNull { it.lensType == LensType.WIDE }
+        val isCurrentlyUltraWide = currentLens.lensType == LensType.ULTRAWIDE
+
+        // Hysteresis & Continuous Zoom logic:
+        // When using 0.5x Ultra-Wide, use UW for the entire 0.5x -> 1.0x range (0.6x = ~1.2x crop, 0.7x = ~1.4x crop, etc.).
+        // Only switch to Main lens when zoom reaches 1.00x.
+        // When zooming out from Main lens, switch back to Ultra-Wide below 0.97x.
+        // If user explicitly taps a preset (.5x), switch to Ultra-Wide immediately.
+        val targetLens: LensInfo? = if (isPresetTap) {
+            when {
+                clampedZoom < 0.95f -> ultraWideLens ?: mainWideLens
+                clampedZoom in 0.95f..<2.0f -> mainWideLens
+                clampedZoom >= 3.0f -> {
+                    backLenses.firstOrNull { it.lensType == LensType.TELEPHOTO_3X && it.isPhysical }
+                        ?: backLenses.firstOrNull { it.lensType == LensType.TELEPHOTO && it.isPhysical }
+                        ?: mainWideLens
+                }
+                clampedZoom >= 2.0f -> {
+                    backLenses.firstOrNull { it.lensType == LensType.TELEPHOTO && it.isPhysical }
+                        ?: mainWideLens
+                }
+                else -> mainWideLens
             }
-            clampedZoom in 1.0f..<2.0f -> {
-                // Target is 1x Main Wide
-                backLenses.firstOrNull { it.lensType == LensType.WIDE && !it.isZoomPreset }
-                    ?: backLenses.firstOrNull { it.lensType == LensType.WIDE }
+        } else {
+            when {
+                isCurrentlyUltraWide -> {
+                    if (clampedZoom >= 1.00f) {
+                        mainWideLens
+                    } else {
+                        ultraWideLens ?: mainWideLens
+                    }
+                }
+                else -> {
+                    if (clampedZoom < 0.97f && ultraWideLens != null) {
+                        ultraWideLens
+                    } else if (clampedZoom >= 3.0f) {
+                        backLenses.firstOrNull { it.lensType == LensType.TELEPHOTO_3X && it.isPhysical }
+                            ?: backLenses.firstOrNull { it.lensType == LensType.TELEPHOTO && it.isPhysical }
+                            ?: mainWideLens
+                    } else if (clampedZoom >= 2.0f) {
+                        backLenses.firstOrNull { it.lensType == LensType.TELEPHOTO && it.isPhysical }
+                            ?: mainWideLens
+                    } else {
+                        mainWideLens
+                    }
+                }
             }
-            clampedZoom >= 3.0f -> {
-                // Target is 3x Telephoto if hardware present, else 2x, else 1x
-                backLenses.firstOrNull { it.lensType == LensType.TELEPHOTO_3X && it.isPhysical }
-                    ?: backLenses.firstOrNull { it.lensType == LensType.TELEPHOTO && it.isPhysical }
-                    ?: backLenses.firstOrNull { it.lensType == LensType.WIDE && !it.isZoomPreset }
-            }
-            clampedZoom >= 2.0f -> {
-                // Target is 2x Telephoto if hardware present, else 1x
-                backLenses.firstOrNull { it.lensType == LensType.TELEPHOTO && it.isPhysical }
-                    ?: backLenses.firstOrNull { it.lensType == LensType.WIDE && !it.isZoomPreset }
-            }
-            else -> null
         }
 
         if (targetLens != null && targetLens != currentLens) {
-            val isDiffHardware = targetLens.cameraId != currentLens.cameraId ||
-                    targetLens.physicalCameraId != currentLens.physicalCameraId
-            if (isDiffHardware) {
-                zoomDebounceJob?.cancel()
-                if (isPresetTap) {
-                    // Instant tap on .5, 1x, 2, 3, 10 -> switch hardware lens immediately
-                    selectLens(targetLens)
-                } else {
-                    // Continuous scrubbing: apply optical/digital zoom immediately to active preview,
-                    // and switch physical camera ID once scrubbing settles (120ms) to prevent HAL freeze!
-                    updatePreviewSettings()
-                    zoomDebounceJob = engineScope.launch {
-                        delay(120)
-                        if (targetLens != _selectedLens.value) {
-                            selectLens(targetLens)
-                        }
-                    }
-                }
+            zoomDebounceJob?.cancel()
+            zoomDebounceJob = null
+
+            // Instant seamless lens switch using warm concurrent stream or handover
+            if (isPresetTap) {
+                selectLens(targetLens, preserveZoom = false)
             } else {
-                _selectedLens.value = targetLens
-                updatePreviewSettings()
+                selectLens(targetLens, preserveZoom = true, targetZoom = clampedZoom)
             }
         } else {
-            // Same lens: apply zoom immediately
+            // Same lens: apply smooth digital crop / optical zoom immediately on active preview
             updatePreviewSettings()
         }
     }

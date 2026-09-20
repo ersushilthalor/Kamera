@@ -79,7 +79,7 @@ class MotorolaInstantSwitchEngine(
     }
 
     // Hardware Concurrent Support Flag
-    private var isConcurrentHardwareSupported = false
+    private var isConcurrentHardwareSupported = true
     private var hasCheckedConcurrentSupport = false
 
     // Dedicated Background HandlerThread
@@ -182,27 +182,33 @@ class MotorolaInstantSwitchEngine(
 
         val mgr = cameraManager ?: return false
         return try {
-            val concurrentSets = mgr.concurrentCameraIds
+            val concurrentSets = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                mgr.concurrentCameraIds
+            } else {
+                emptySet()
+            }
             Log.d(TAG, "Checking HAL concurrentCameraIds for [$primaryCameraId, $secondaryCameraId]. Available sets: $concurrentSets")
             val isSupported = concurrentSets.any { set ->
                 set.contains(primaryCameraId) && set.contains(secondaryCameraId)
             }
-            isConcurrentHardwareSupported = isSupported
+            // Many OEM multi-camera HALs support streaming both rear cameras simultaneously
+            // even if not explicitly exposed in concurrentCameraIds.
+            // Attempt concurrent mode by default and only fall back if openCamera throws ERROR_MAX_CAMERAS_IN_USE.
+            isConcurrentHardwareSupported = true
             hasCheckedConcurrentSupport = true
 
             if (isSupported) {
                 Log.i(TAG, "Hardware concurrent camera support CONFIRMED for [$primaryCameraId, $secondaryCameraId]")
-                updateConcurrentState(true, "Motorola Dual-Camera Concurrent Mode Ready")
+                updateConcurrentState(true, "Dual-Camera Concurrent Stream Ready")
             } else {
-                Log.i(TAG, "HAL does not support concurrent streaming of [$primaryCameraId, $secondaryCameraId]. Using Turbo Fast Handover.")
-                updateConcurrentState(false, "Hardware Concurrent Unsupported (Fast Handover Active)")
+                Log.i(TAG, "HAL does not explicitly list pair [$primaryCameraId, $secondaryCameraId], attempting direct concurrent stream.")
+                updateConcurrentState(true, "Dual-Camera Stream Ready")
             }
-            isSupported
+            true
         } catch (t: Throwable) {
             Log.w(TAG, "Failed to query concurrentCameraIds from CameraManager", t)
-            isConcurrentHardwareSupported = false
-            updateConcurrentState(false, "Concurrent Query Error: Turbo Fast Handover")
-            false
+            isConcurrentHardwareSupported = true
+            true
         }
     }
 
@@ -325,19 +331,24 @@ class MotorolaInstantSwitchEngine(
             }
             openStandbyCamera(ultraWideLens)
         } else if (primary.lensType == LensType.ULTRAWIDE) {
-            // When user is on Ultra-Wide, we can keep Main warm in reverse!
+            // When user is on Ultra-Wide, keep Main warm in reverse!
             val mainLens = availableLenses.firstOrNull {
                 it.facing == CameraCharacteristics.LENS_FACING_BACK && it.lensType == LensType.WIDE && !it.isZoomPreset
+            } ?: availableLenses.firstOrNull {
+                it.facing == CameraCharacteristics.LENS_FACING_BACK && it.lensType == LensType.WIDE
             }
             if (mainLens != null) {
-                // If main standby is already running, update status
-                val previewActive = state.isShowUltraWidePreview
-                compositor.isLittlePreviewEnabled = previewActive
-                _switchState.value = state.copy(
-                    ultraWideStatus = BackgroundCameraStatus.OFF,
-                    activeStandbyLens = LensType.WIDE,
-                    statusMessage = "Main 1× Standby Ready"
-                )
+                if (standbyCameraDevice != null && activeStandbyLens?.cameraId == mainLens.cameraId) {
+                    val previewActive = state.isShowUltraWidePreview
+                    compositor.isLittlePreviewEnabled = previewActive
+                    _switchState.value = state.copy(
+                        ultraWideStatus = BackgroundCameraStatus.OFF,
+                        activeStandbyLens = LensType.WIDE,
+                        statusMessage = "Main 1× Standby Ready"
+                    )
+                    return
+                }
+                openStandbyCamera(mainLens)
             }
         } else {
             closeBackgroundCamera()
@@ -434,8 +445,12 @@ class MotorolaInstantSwitchEngine(
      */
     private fun createStandbyCaptureSession(camera: CameraDevice, lens: LensInfo) {
         val handler = backgroundHandler ?: return
-        val previewSurf = compositor.ultraWideCameraSurface ?: run {
-            Log.w(TAG, "compositor.ultraWideCameraSurface is not ready yet")
+        val previewSurf = if (lens.lensType == LensType.ULTRAWIDE) {
+            compositor.ultraWideCameraSurface
+        } else {
+            compositor.mainCameraSurface
+        } ?: run {
+            Log.w(TAG, "compositor surface for ${lens.lensType} is not ready yet")
             return
         }
 
@@ -612,6 +627,74 @@ class MotorolaInstantSwitchEngine(
                 Log.d(TAG, "Standby repeating request verified running for ${lens.lensType}")
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to re-submit standby repeating request for ${lens.lensType}", e)
+            }
+        }
+    }
+
+    /**
+     * Updates the standby camera repeating request with synchronized zoom.
+     * Ensures that when the user switches to the standby camera, it is already
+     * at the exact right crop/zoom without delay or jump.
+     */
+    fun updateStandbyZoom(zoom: Float) {
+        synchronized(sessionLock) {
+            val session = standbyCaptureSession ?: return
+            val device = standbyCameraDevice ?: return
+            val lens = activeStandbyLens ?: return
+            val handler = backgroundHandler ?: return
+            val previewSurf = if (lens.lensType == LensType.ULTRAWIDE) {
+                compositor.ultraWideCameraSurface
+            } else {
+                compositor.mainCameraSurface
+            } ?: return
+            if (!previewSurf.isValid) return
+
+            try {
+                val isUltraWide = lens.lensType == LensType.ULTRAWIDE || lens.baseZoomRatio < 0.9f
+                val targetDigitalZoom = if (isUltraWide) {
+                    val base = if (lens.baseZoomRatio > 0.1f) lens.baseZoomRatio else 0.5f
+                    (zoom / base).coerceAtLeast(1.0f)
+                } else {
+                    val baseRatio = if (lens.baseZoomRatio > 0f) lens.baseZoomRatio else 1.0f
+                    if (lens.isPhysical && baseRatio > 1.2f) {
+                        (zoom / baseRatio).coerceAtLeast(1.0f)
+                    } else {
+                        zoom.coerceAtLeast(1.0f)
+                    }
+                }
+
+                val req = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                    addTarget(previewSurf)
+                    set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+                    set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                    set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                    set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
+
+                    val chars = cameraManager?.getCameraCharacteristics(lens.cameraId)
+                    if (chars != null) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            val zoomRange = chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                            if (zoomRange != null) {
+                                val clamped = targetDigitalZoom.coerceIn(zoomRange.lower, zoomRange.upper)
+                                set(CaptureRequest.CONTROL_ZOOM_RATIO, clamped)
+                            }
+                        } else {
+                            val sensorRect = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                            val maxZoom = chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1.0f
+                            if (sensorRect != null) {
+                                val effectiveZoom = targetDigitalZoom.coerceIn(1.0f, maxZoom)
+                                val cropW = (sensorRect.width() / effectiveZoom).toInt()
+                                val cropH = (sensorRect.height() / effectiveZoom).toInt()
+                                val cropX = (sensorRect.width() - cropW) / 2
+                                val cropY = (sensorRect.height() - cropH) / 2
+                                set(CaptureRequest.SCALER_CROP_REGION, android.graphics.Rect(cropX, cropY, cropX + cropW, cropY + cropH))
+                            }
+                        }
+                    }
+                }.build()
+                session.setRepeatingRequest(req, null, handler)
+            } catch (ignored: Exception) {
+                // Ignore if session is busy or transitioning
             }
         }
     }
