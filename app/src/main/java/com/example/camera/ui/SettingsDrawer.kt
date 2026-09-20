@@ -655,18 +655,18 @@ fun SettingsDrawer(
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     listOf(
                                         CinemaColorProfile.NATIVE,
-                                        CinemaColorProfile.REC_709,
                                         CinemaColorProfile.FLAT_LOG,
+                                        CinemaColorProfile.REC_2020,
                                         CinemaColorProfile.HLG,
-                                        CinemaColorProfile.REC_2020
+                                        CinemaColorProfile.APPLE_LOG_2
                                     ).forEach { profile ->
                                         SamsungSmallChip(
                                             label = when (profile) {
                                                 CinemaColorProfile.NATIVE -> "Native"
-                                                CinemaColorProfile.REC_709 -> "Rec.709"
-                                                CinemaColorProfile.FLAT_LOG -> "Flat Log"
-                                                CinemaColorProfile.HLG -> "HLG"
+                                                CinemaColorProfile.FLAT_LOG -> "Flat"
                                                 CinemaColorProfile.REC_2020 -> "Rec.2020"
+                                                CinemaColorProfile.HLG -> "HLG"
+                                                CinemaColorProfile.APPLE_LOG_2 -> "Apple Log 2"
                                                 else -> profile.label
                                             },
                                             isSelected = cinemaConfig.colorProfile == profile,

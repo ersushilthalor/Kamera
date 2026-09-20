@@ -118,8 +118,6 @@ fun CameraScreen(
     val portraitConfig by viewModel.portraitConfig.collectAsStateWithLifecycle()
     val portraitProcessingState by viewModel.portraitProcessingState.collectAsStateWithLifecycle()
     val isPortraitSettingsOpen by viewModel.isPortraitSettingsOpen.collectAsStateWithLifecycle()
-    val rawPreviewBitmap by viewModel.rawPreviewBitmap.collectAsStateWithLifecycle()
-    val rawVideoTelemetry by viewModel.rawVideoTelemetry.collectAsStateWithLifecycle()
     val saveSelfieAsPreviewed by viewModel.saveSelfieAsPreviewed.collectAsStateWithLifecycle()
     val photoMegapixelMode by viewModel.photoMegapixelMode.collectAsStateWithLifecycle()
     val isRefocusPhotoEnabled by viewModel.isRefocusPhotoEnabled.collectAsStateWithLifecycle()
@@ -269,8 +267,6 @@ fun CameraScreen(
             isLutPreviewEnabled = cinemaConfig.isLutPreviewEnabled,
             cinemaConfig = cinemaConfig,
             rec2020AutoToneParams = rec2020AutoToneParams,
-            rawPreviewBitmap = rawPreviewBitmap,
-            rawVideoTelemetry = rawVideoTelemetry,
             onSurfaceTextureAvailable = { texture ->
                 viewModel.engine.setPreviewSurfaceTexture(texture)
             },
@@ -367,42 +363,6 @@ fun CameraScreen(
             }
         }
 
-        // Dedicated RAW Video Telemetry HUD
-        if (cameraMode == CameraMode.RAW_VIDEO) {
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xCC181308),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF9800).copy(alpha = 0.5f)),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .statusBarsPadding()
-                    .padding(top = 58.dp)
-                    .testTag("raw_video_telemetry_hud")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(if (isRecordingVideo) Color(0xFFFF3B30) else Color(0xFFFF9800))
-                    )
-                    Text(
-                        text = if (isRecordingVideo) {
-                            "RAW REC [${rawVideoTelemetry.recordedFrames}f] • ${(rawVideoTelemetry.currentDataRateMbPerSec).toInt()} MB/s • ${rawVideoTelemetry.estimatedRemainingMinutes}m left"
-                        } else {
-                            "RAW SENSOR STREAM • Bayer 16-bit Lossless • Direct ImageReader"
-                        },
-                        color = Color.White,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-        }
 
 
         // 1g. Motorola Instant Camera Switching Picture-in-Picture Little Preview
@@ -669,10 +629,6 @@ fun CameraScreen(
             onSelectAiSubjectTracking = {
                 viewModel.setMoreModesOpen(false)
                 viewModel.setCameraMode(CameraMode.AI_SUBJECT_TRACKING)
-            },
-            onSelectRawVideo = {
-                viewModel.setMoreModesOpen(false)
-                viewModel.setCameraMode(CameraMode.RAW_VIDEO)
             },
             onOpenSettings = {
                 viewModel.setMoreModesOpen(false)

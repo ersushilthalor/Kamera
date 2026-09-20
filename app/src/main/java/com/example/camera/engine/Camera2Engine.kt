@@ -175,7 +175,6 @@ class Camera2Engine(private val context: Context) {
     var selectedPhotoFilter: PhotoFilter = PhotoFilter.ORIGINAL
     private val cinemaSoftwareRecorder by lazy { CinemaSoftwareRecordingEngine(context) }
     private var isSoftwareCinemaRecording: Boolean = false
-    private var isRawVideoRecording: Boolean = false
 
     private val _previewBufferSize = MutableStateFlow<Size?>(null)
     val previewBufferSize: StateFlow<Size?> = _previewBufferSize.asStateFlow()
@@ -229,17 +228,13 @@ class Camera2Engine(private val context: Context) {
     private var restartPending = false
     private var zoomDebounceJob: Job? = null
 
-    val rawVideoPreviewRenderer = RawVideoPreviewRenderer()
-    val rawPreviewBitmap: StateFlow<Bitmap?> = rawVideoPreviewRenderer.rawPreviewBitmap
-    val rawVideoRecordingEngine = RawVideoRecordingEngine(context)
-    val rawVideoTelemetry: StateFlow<RawVideoTelemetry> = rawVideoRecordingEngine.telemetry
-
     val cinemaEngine = CinemaEngine(context)
     private val _cinemaConfig = MutableStateFlow(cinemaEngine.config)
     val cinemaConfig: StateFlow<CinemaConfig> = _cinemaConfig.asStateFlow()
     private val _cinemaCapabilities = MutableStateFlow(cinemaEngine.capabilities)
     val cinemaCapabilities: StateFlow<CinemaHardwareCapabilities> = _cinemaCapabilities.asStateFlow()
     val rec2020AutoToneParams: StateFlow<Rec2020AutoToneParams> = cinemaEngine.rec2020AutoToneEngine.currentParams
+    val nativeNaturalParams: StateFlow<NativeNaturalToneParams> = cinemaEngine.nativeNaturalEngine.currentParams
 
     val ultraRes50MStacker = UltraRes50MStacker(context)
     val refocusEngine = RefocusEngine(context)
@@ -833,7 +828,7 @@ class Camera2Engine(private val context: Context) {
     }
 
     private fun updatePreviewAspectRatio() {
-        if (currentMode == CameraMode.VIDEO || currentMode == CameraMode.CINEMA || currentMode == CameraMode.RAW_VIDEO) {
+        if (currentMode == CameraMode.VIDEO || currentMode == CameraMode.CINEMA) {
             val res = if (currentMode == CameraMode.CINEMA && cinemaConfig.value.selectedResolution != null) {
                 cinemaConfig.value.selectedResolution
             } else {
@@ -971,11 +966,6 @@ class Camera2Engine(private val context: Context) {
         val wasPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
         val isPhotoOrPortrait = (mode == CameraMode.PHOTO || mode == CameraMode.PORTRAIT)
         val wasMore = (currentMode == CameraMode.MORE)
-        val wasRawVideo = (currentMode == CameraMode.RAW_VIDEO)
-        val isRawVideo = (mode == CameraMode.RAW_VIDEO)
-        if (wasRawVideo && !isRawVideo) {
-            rawVideoPreviewRenderer.clear()
-        }
         if (_isRecordingVideo.value) {
             stopVideoRecording()
         }
@@ -983,7 +973,7 @@ class Camera2Engine(private val context: Context) {
         updatePreviewAspectRatio()
 
         val isVideoMode = (mode == CameraMode.VIDEO || mode == CameraMode.CINEMA ||
-                mode == CameraMode.DOLLY_ZOOM || mode == CameraMode.RAW_VIDEO)
+                mode == CameraMode.DOLLY_ZOOM)
         if (!isVideoMode || !_hybridStabilizationConfig.value.isUltraStabilizationEnabled) {
             gyroStabilizationEngine.stop()
             lastStabilizedCrop = null
@@ -993,7 +983,6 @@ class Camera2Engine(private val context: Context) {
 
         val needsReconfigure = (wasPhotoOrPortrait != isPhotoOrPortrait) ||
                 (wasMore && isPhotoOrPortrait) ||
-                (wasRawVideo != isRawVideo) ||
                 (captureSession == null) ||
                 (!_isCameraReady.value)
 
@@ -1326,7 +1315,7 @@ class Camera2Engine(private val context: Context) {
             Log.e(TAG, "Failed to create uncompressed YUV ImageReader for Custom Pipeline", t)
         }
 
-        if (caps.supportsRaw && (isRawCaptureEnabled || currentMode == CameraMode.RAW_VIDEO) && caps.supportedRawResolutions.isNotEmpty()) {
+        if (caps.supportsRaw && isRawCaptureEnabled && caps.supportedRawResolutions.isNotEmpty()) {
             val rawRes = caps.supportedRawResolutions.first()
             try {
                 imageReaderRaw = ImageReader.newInstance(
@@ -1395,28 +1384,6 @@ class Camera2Engine(private val context: Context) {
 
         val activeLens = _selectedLens.value
 
-        if (currentMode == CameraMode.RAW_VIDEO) {
-            val lensId = activeLens?.cameraId ?: "0"
-            val chars = getCharacteristics(lensId)
-            imageReaderRaw?.setOnImageAvailableListener({ reader ->
-                try {
-                    val img = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-                    try {
-                        if (currentMode == CameraMode.RAW_VIDEO) {
-                            rawVideoPreviewRenderer.renderRawBayerToPreview(img, chars)
-                            if (_isRecordingVideo.value && isRawVideoRecording) {
-                                rawVideoRecordingEngine.onRawImageAvailable(img, lastCaptureResult)
-                            }
-                        }
-                    } finally {
-                        img.close()
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "RAW video frame callback error", e)
-                }
-            }, backgroundHandler)
-        }
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
             activeLens?.physicalCameraId != null &&
             activeLens.physicalCameraId != activeLens.cameraId) {
@@ -1445,9 +1412,6 @@ class Camera2Engine(private val context: Context) {
                 val template = CameraDevice.TEMPLATE_PREVIEW
                 previewRequestBuilder = camera.createCaptureRequest(template).apply {
                     addTarget(previewSurf)
-                    if (currentMode == CameraMode.RAW_VIDEO) {
-                        imageReaderRaw?.surface?.let { addTarget(it) }
-                    }
                     applyCommonSettings(this)
                 }
 
@@ -1499,9 +1463,6 @@ class Camera2Engine(private val context: Context) {
 
             previewRequestBuilder = camera.createCaptureRequest(template).apply {
                 addTarget(previewSurf)
-                if (currentMode == CameraMode.RAW_VIDEO) {
-                    imageReaderRaw?.surface?.let { addTarget(it) }
-                }
                 applyCommonSettings(this)
             }
 
@@ -1617,6 +1578,11 @@ class Camera2Engine(private val context: Context) {
                 val chars = if (lens != null) getCharacteristics(lens.cameraId) else null
                 cinemaEngine.rec2020AutoToneEngine.onFrameCaptured(result, chars)
                 onRec2020AutoToneFrame()
+            } else if (currentMode == CameraMode.CINEMA && _cinemaConfig.value.colorProfile == CinemaColorProfile.NATIVE) {
+                val lens = _selectedLens.value
+                val chars = if (lens != null) getCharacteristics(lens.cameraId) else null
+                cinemaEngine.nativeNaturalEngine.onFrameCaptured(result, chars)
+                onNativeNaturalAutoToneFrame()
             }
         }
     }
@@ -1628,6 +1594,21 @@ class Camera2Engine(private val context: Context) {
         if (!cinemaEngine.rec2020AutoToneEngine.hasSignificantChangeSinceLastIspUpdate()) return
         lastRec2020IspUpdateTime = now
         cinemaEngine.rec2020AutoToneEngine.markIspUpdated()
+        val session = captureSession ?: return
+        val builder = previewRequestBuilder ?: return
+        try {
+            cinemaEngine.applyToCaptureRequest(builder)
+            session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
+        } catch (ignored: Exception) {}
+    }
+
+    private var lastNativeNaturalIspUpdateTime = 0L
+    private fun onNativeNaturalAutoToneFrame() {
+        val now = System.currentTimeMillis()
+        if (now - lastNativeNaturalIspUpdateTime < 66L) return // 15fps throttle for repeating ISP tonemap updates
+        if (!cinemaEngine.nativeNaturalEngine.hasSignificantChangeSinceLastIspUpdate()) return
+        lastNativeNaturalIspUpdateTime = now
+        cinemaEngine.nativeNaturalEngine.markIspUpdated()
         val session = captureSession ?: return
         val builder = previewRequestBuilder ?: return
         try {
@@ -3454,47 +3435,6 @@ class Camera2Engine(private val context: Context) {
             val recordingDir = context.externalCacheDir ?: context.cacheDir
             recordingDir.mkdirs()
 
-            val isRawVideo = (currentMode == CameraMode.RAW_VIDEO)
-
-            if (isRawVideo) {
-                val characteristics = getCharacteristics(lens.cameraId)
-                val (supported, reason) = rawVideoRecordingEngine.checkHardwareSupport(characteristics)
-                if (!supported) {
-                    onError(reason ?: "Sensor RAW capture not supported on this camera")
-                    return
-                }
-
-                val prefix = "RAW_VID_"
-                val extension = "rawvid"
-                val mimeType = "video/raw"
-                val fileName = "${prefix}$timeStamp.$extension"
-                currentVideoFileName = fileName
-                currentVideoMimeType = mimeType
-
-                val tempFile = File(recordingDir, "raw_temp_${System.currentTimeMillis()}.$extension").apply {
-                    if (exists()) delete()
-                    createNewFile()
-                }
-                currentRecordingTempFile = tempFile
-
-                val rawStarted = rawVideoRecordingEngine.startRecording(
-                    destFile = tempFile,
-                    width = imageReaderRaw?.width ?: videoRes.width,
-                    height = imageReaderRaw?.height ?: videoRes.height,
-                    fps = targetFps,
-                    characteristics = characteristics
-                )
-                if (!rawStarted) {
-                    onError("Failed to initialize RAW bayer stream")
-                    return
-                }
-
-                isRawVideoRecording = true
-                startVideoTimer()
-                _isRecordingVideo.value = true
-                return
-            }
-
             val tempFileName = if (isCinema) {
                 "cinema_temp_${System.currentTimeMillis()}.$extension"
             } else {
@@ -3791,7 +3731,7 @@ class Camera2Engine(private val context: Context) {
      */
     fun stopVideoRecording() {
         activeRecordingSurface = null
-        if (!_isRecordingVideo.value && !isSoftwareCinemaRecording && !isRawVideoRecording) return
+        if (!_isRecordingVideo.value && !isSoftwareCinemaRecording) return
 
         try {
             val isCinema = (currentMode == CameraMode.CINEMA)
@@ -3799,46 +3739,6 @@ class Camera2Engine(private val context: Context) {
             val mimeType = currentVideoMimeType ?: "video/mp4"
             currentVideoFileName = null
             currentVideoMimeType = null
-
-            if (isRawVideoRecording) {
-                isRawVideoRecording = false
-                videoTimerJob?.cancel()
-                _isRecordingVideo.value = false
-                val recordedFile = rawVideoRecordingEngine.stopRecording()
-                currentRecordingTempFile = null
-                val activeLens = _selectedLens.value
-                val isFrontFacing = activeLens?.facing == CameraCharacteristics.LENS_FACING_FRONT
-
-                engineScope.launch(Dispatchers.IO) {
-                    try {
-                        if (recordedFile != null && recordedFile.exists() && recordedFile.length() > 0) {
-                            val savedUri = saveVideoToGallery(
-                                tempFile = recordedFile,
-                                fileName = fileName,
-                                mimeType = mimeType,
-                                isCinema = false,
-                                isFrontFacing = isFrontFacing
-                            )
-                            if (savedUri != null) {
-                                _lastCapturedMedia.value = CapturedMedia(
-                                    uri = savedUri,
-                                    isVideo = true,
-                                    timestamp = System.currentTimeMillis(),
-                                    displayName = "RAW Sensor Video",
-                                    isFrontCamera = isFrontFacing
-                                )
-                                Log.i(TAG, "RAW video successfully saved to Gallery: size=${recordedFile.length()} bytes, uri=$savedUri")
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to save RAW video to gallery", e)
-                    } finally {
-                        try { recordedFile?.delete() } catch (ignored: Exception) {}
-                        updateStorageStats()
-                    }
-                }
-                return
-            }
 
             if (isSoftwareCinemaRecording) {
                 isSoftwareCinemaRecording = false

@@ -38,7 +38,6 @@ fun MoreModesDrawer(
     onSelectNight: () -> Unit,
     onSelectDollyZoom: () -> Unit = {},
     onSelectAiSubjectTracking: () -> Unit = {},
-    onSelectRawVideo: () -> Unit = {},
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -171,17 +170,6 @@ fun MoreModesDrawer(
                         onClick = onSelectAiSubjectTracking
                     )
                 }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                MoreModeCard(
-                    icon = Icons.Outlined.Videocam,
-                    title = "RAW Video",
-                    subtitle = "Direct sensor Bayer 16-bit stream • Bypass ISP",
-                    tag = "mode_card_raw_video",
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = onSelectRawVideo
-                )
 
                 Spacer(modifier = Modifier.height(10.dp))
 

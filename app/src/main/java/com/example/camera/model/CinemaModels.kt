@@ -24,14 +24,11 @@ enum class CinemaColorProfile(
     val description: String,
     val gammaName: String
 ) {
-    NATIVE("Native", "Natural, standard video colors ready to share with balanced contrast and skin tones", "Native"),
-    FLAT_LOG("Flat (LOG)", "Logarithmic dynamic range curve for color grading", "Flat Log"),
-    S_LOG3("S-Log3", "Sony S-Log3 cine curve preserving 14+ stops of dynamic range", "S-Log3"),
-    C_LOG3("C-Log3", "Canon Log 3 filmic contrast curve with smooth highlight rolloff", "C-Log3"),
-    V_LOG("V-Log", "Panasonic V-Log logarithmic transfer curve for maximum latitude", "V-Log"),
-    REC_709("Rec.709", "ITU-R BT.709 standard broadcast display gamma", "BT.709"),
+    NATIVE("Native", "iPhone-style natural video processing with true-to-life colors, balanced sky/ground, and intelligent shadow recovery", "Native"),
+    FLAT_LOG("Flat", "Logarithmic dynamic range curve for color grading", "Flat Log"),
     REC_2020("Rec.2020", "ITU-R BT.2020 wide color gamut transfer curve", "BT.2020"),
-    HLG("HLG", "ITU-R BT.2100 Hybrid Log-Gamma HDR profile", "HLG")
+    HLG("HLG", "ITU-R BT.2100 Hybrid Log-Gamma HDR profile", "HLG"),
+    APPLE_LOG_2("Apple Log 2", "Apple Log 2 wide-gamut log transfer curve with extended highlight latitude and parabolic shadow retention", "Apple Log 2")
 }
 
 enum class CinemaColorSpace(val label: String) {
@@ -88,7 +85,7 @@ data class CinemaConfig(
     val manualIso: Int? = null, // null for Auto, or 50, 100, 200, 400, 800, 1600, 3200
     val manualShutterSpeedNs: Long? = null // null for Auto, or 1/24s, 1/48s (180°), 1/50s, 1/96s, 1/120s
 ) {
-    val isLogMode: Boolean get() = (colorProfile != CinemaColorProfile.REC_709 && colorProfile != CinemaColorProfile.NATIVE) || logBitDepth != LogBitDepth.OFF
+    val isLogMode: Boolean get() = (colorProfile != CinemaColorProfile.NATIVE) || logBitDepth != LogBitDepth.OFF
     val activeLut: CinematicLut get() = selectedLut
     val shouldBakeLut: Boolean get() = isBakeLutToOutput && selectedLut != CinematicLut.NONE
 }

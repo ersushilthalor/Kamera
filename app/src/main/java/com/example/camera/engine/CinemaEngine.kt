@@ -54,6 +54,7 @@ class CinemaEngine(private val context: Context) {
         }
 
     val rec2020AutoToneEngine = Rec2020AutoToneEngine()
+    val nativeNaturalEngine = NativeNaturalVideoEngine()
 
     fun updateConfig(newConfig: CinemaConfig) {
         config = newConfig
@@ -62,6 +63,14 @@ class CinemaEngine(private val context: Context) {
     fun getTonemapCurve(): TonemapCurve {
         if (config.colorProfile == CinemaColorProfile.REC_2020) {
             return rec2020AutoToneEngine.getTonemapCurve()
+        }
+        if (config.colorProfile == CinemaColorProfile.NATIVE) {
+            return nativeNaturalEngine.getTonemapCurve(
+                userShadows = config.shadows,
+                userHighlights = config.highlights,
+                userContrast = config.contrast,
+                userExposure = config.exposure
+            )
         }
         val lutForIsp = if (config.shouldBakeLut) config.selectedLut else CinematicLut.NONE
         return generateLogTonemapCurve(
@@ -235,6 +244,23 @@ class CinemaEngine(private val context: Context) {
                 } else {
                     builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)
                 }
+            } else if (config.colorProfile == CinemaColorProfile.NATIVE) {
+                // Modern iPhone-style Natural Video Processing
+                if (supportsContrastCurve) {
+                    val tonemapCurve = nativeNaturalEngine.getTonemapCurve(
+                        userShadows = config.shadows,
+                        userHighlights = config.highlights,
+                        userContrast = config.contrast,
+                        userExposure = config.exposure
+                    )
+                    builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
+                    builder.set(CaptureRequest.TONEMAP_CURVE, tonemapCurve)
+                } else if (supportsGammaValue) {
+                    builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_GAMMA_VALUE)
+                    builder.set(CaptureRequest.TONEMAP_GAMMA, 2.2f)
+                } else {
+                    builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)
+                }
             } else if (supportsContrastCurve) {
                 val tonemapCurve = generateLogTonemapCurve(
                     config.colorProfile,
@@ -251,10 +277,10 @@ class CinemaEngine(private val context: Context) {
                 // Adaptive logarithmic gamma fallback for HALs without custom curve support
                 val baseGamma = when (config.colorProfile) {
                     CinemaColorProfile.NATIVE -> 2.2f
-                    CinemaColorProfile.FLAT_LOG, CinemaColorProfile.S_LOG3, CinemaColorProfile.C_LOG3, CinemaColorProfile.V_LOG -> 1.55f
+                    CinemaColorProfile.FLAT_LOG -> 1.55f
                     CinemaColorProfile.HLG -> 1.8f
                     CinemaColorProfile.REC_2020 -> 2.1f
-                    CinemaColorProfile.REC_709 -> 2.2f
+                    CinemaColorProfile.APPLE_LOG_2 -> 1.60f
                 }
                 val lutContrastOffset = if (lutForIsp != CinematicLut.NONE) (lutForIsp.contrast - 1.0f) * 0.3f else 0.0f
                 val washedOutOffset = config.washedOut * 0.35f
@@ -272,6 +298,16 @@ class CinemaEngine(private val context: Context) {
                     // Maintain Camera2 ISP in High Quality Color Correction mode with factory-calibrated AWB gains.
                     // This strictly prevents channel imbalance and false color / red / pink tint artifacts in bright highlights!
                     builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_HIGH_QUALITY)
+                } else if (config.colorProfile == CinemaColorProfile.NATIVE) {
+                    // Ultra-natural real-life colors: neutral white gains with zero yellow/warm bias
+                    val transform = nativeNaturalEngine.getColorSpaceTransform(config.colorSpace)
+                    if (supportsTransformMatrix) {
+                        builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
+                        builder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform)
+                        builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, nativeNaturalEngine.getNeutralWhiteGains())
+                    } else {
+                        builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_HIGH_QUALITY)
+                    }
                 } else {
                     val transform = generateColorSpaceTransform(
                         config.colorSpace,
@@ -415,7 +451,7 @@ class CinemaEngine(private val context: Context) {
             var y = evaluateLogTransferFunction(profile, x)
 
             // Intelligent Washed-Out reduction (0.0 = original flat curve, 1.0 = progressive restoration of contrast, black depth, and dynamic separation)
-            if (washedOut > 0.0f && profile != CinemaColorProfile.REC_709 && profile != CinemaColorProfile.NATIVE) {
+            if (washedOut > 0.0f && profile != CinemaColorProfile.NATIVE) {
                 // Determine raw black pedestal for the profile at x = 0
                 val rawPedestal = evaluateLogTransferFunction(profile, 0.0f)
                 // Evaluate target natural tone curve
@@ -507,45 +543,6 @@ class CinemaEngine(private val context: Context) {
                 val logVal = ln(1f + 14.0f * inVal) / ln(15.0f)
                 (0.16f + 0.78f * logVal).coerceIn(0f, 1f)
             }
-            CinemaColorProfile.S_LOG3 -> {
-                // Official Sony S-Log3 transfer function:
-                if (inVal >= 0.01125f) {
-                    val logPart = log10((inVal + 0.01f) / (0.18f + 0.01f))
-                    val y = (420.0f + logPart * 261.5f) / 1023.0f
-                    y.coerceIn(0f, 1f)
-                } else {
-                    val y = (inVal * (171.2102946643f - 95.0f) / 0.01125f + 95.0f) / 1023.0f
-                    y.coerceIn(0f, 1f)
-                }
-            }
-            CinemaColorProfile.C_LOG3 -> {
-                // Official Canon Log 3 transfer function:
-                if (inVal < 0.014f) {
-                    (0.529136f * inVal + 0.0730597f).coerceIn(0f, 1f)
-                } else {
-                    (0.127837f * ln(inVal * 14.98325f + 1.0f) + 0.0730597f).coerceIn(0f, 1f)
-                }
-            }
-            CinemaColorProfile.V_LOG -> {
-                // Official Panasonic V-Log transfer function:
-                val cut = 0.01f
-                val b = 0.00873f
-                val c = 0.241514f
-                val d = 0.598206f
-                if (inVal < cut) {
-                    (5.6f * inVal + 0.125f).coerceIn(0f, 1f)
-                } else {
-                    (c * log10(inVal + b) + d).coerceIn(0f, 1f)
-                }
-            }
-            CinemaColorProfile.REC_709 -> {
-                // ITU-R BT.709 standard transfer function:
-                if (inVal < 0.018f) {
-                    (4.5f * inVal).coerceIn(0f, 1f)
-                } else {
-                    (1.099f * inVal.pow(0.45f) - 0.099f).coerceIn(0f, 1f)
-                }
-            }
             CinemaColorProfile.REC_2020 -> {
                 // ITU-R BT.2020 standard transfer function (OETF) without artificial pedestal lift:
                 // Preserves inky blacks (y=0 at inVal=0), punchy natural contrast, and crisp whites at inVal=1
@@ -567,6 +564,38 @@ class CinemaEngine(private val context: Context) {
                     val c = 0.55991073f
                     (a * ln(12.0f * inVal - b) + c).coerceIn(0f, 1f)
                 }
+            }
+            CinemaColorProfile.APPLE_LOG_2 -> {
+                // Official Apple Log 2 transfer function specification:
+                // Piecewise curve with parabolic shadow toe and logarithmic midtone/highlight retention
+                val r0 = -0.05641088f
+                val rt = 0.01f
+                val c = 47.28711236f
+                val beta = 0.00964052f
+                val gamma = 0.08550479f
+                val delta = 0.69336945f
+                val ln2 = 0.69314718056f
+
+                // Map normalized sensor input inVal [0, 1] into scene linear reflection R
+                // inVal = 0.18 maps to R = 0.18 (Apple Log middle gray code value 0.488272)
+                // inVal = 0.0 maps to R = 0.0 (Apple Log black pedestal 0.150477)
+                // Highlights expand smoothly up to 12+ stops dynamic range latitude for color grading
+                val r = if (inVal <= 0.18f) {
+                    inVal
+                } else {
+                    val t = (inVal - 0.18f) / 0.82f
+                    0.18f + t * (1.0f + 8.5f * t)
+                }
+
+                val y = when {
+                    r < r0 -> 0.0f
+                    r < rt -> c * (r - r0) * (r - r0)
+                    else -> {
+                        val log2Val = ln(r + beta) / ln2
+                        gamma * log2Val + delta
+                    }
+                }
+                y.coerceIn(0f, 1f)
             }
         }
     }
@@ -599,12 +628,24 @@ class CinemaEngine(private val context: Context) {
             )
         }
 
+        // Apple Log 2 uses BT.2020 wide-gamut primaries natively for grading latitude
+        val effectiveBase = if (profile == CinemaColorProfile.APPLE_LOG_2 && colorSpace == CinemaColorSpace.REC_709) {
+            floatArrayOf(
+                0.6274f, 0.3293f, 0.0433f,
+                0.0691f, 0.9195f, 0.0114f,
+                0.0164f, 0.0880f, 0.8956f
+            )
+        } else {
+            base
+        }
+
         // Apply profile-specific saturation compensation & user saturation
         val profileSatMultiplier = when (profile) {
             CinemaColorProfile.NATIVE -> 1.0f
             CinemaColorProfile.HLG -> 1.15f // Balanced natural HLG saturation
             CinemaColorProfile.FLAT_LOG -> 0.88f // Flat desaturated base for pure Log
-            else -> 1.0f
+            CinemaColorProfile.REC_2020 -> 1.0f
+            CinemaColorProfile.APPLE_LOG_2 -> 0.88f // Flat wide-gamut baseline for grading headroom
         }
         // Washed-out restoration adds intelligent chroma vibrance without harsh clipping
         val washedOutChromaBoost = 1.0f + (washedOut * 0.35f)
@@ -619,7 +660,7 @@ class CinemaEngine(private val context: Context) {
                 else -> 0.114f
             }
             for (col in 0..2) {
-                val baseVal = base[row * 3 + col]
+                val baseVal = effectiveBase[row * 3 + col]
                 var cellVal = (1.0f - effectiveSat) * lum + effectiveSat * baseVal
 
                 // Blend in LUT's matrix color separation if available

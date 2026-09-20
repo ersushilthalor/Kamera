@@ -12,7 +12,6 @@ import androidx.lifecycle.viewModelScope
 import com.example.camera.data.CameraPreferences
 import com.example.camera.engine.Camera2Engine
 import com.example.camera.engine.PortraitProcessor
-import com.example.camera.engine.RawVideoTelemetry
 import com.example.camera.model.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -136,10 +135,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // Portrait Settings Window Open/Close
     private val _isPortraitSettingsOpen = MutableStateFlow(false)
     val isPortraitSettingsOpen: StateFlow<Boolean> = _isPortraitSettingsOpen.asStateFlow()
-
-    // Sensor RAW Video State & Live Viewfinder Demosaic Stream
-    val rawVideoTelemetry: StateFlow<RawVideoTelemetry> = engine.rawVideoTelemetry
-    val rawPreviewBitmap: StateFlow<android.graphics.Bitmap?> = engine.rawPreviewBitmap
 
     // Cinema Mode State & Panel visibility
     val cinemaConfig: StateFlow<CinemaConfig> = engine.cinemaConfig
@@ -536,7 +531,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         engine.updateHybridStabilizationConfig(preferences.hybridStabilizationConfig)
 
         // Restore initial mode aspect ratio
-        if (initialMode == CameraMode.VIDEO || initialMode == CameraMode.CINEMA || initialMode == CameraMode.DOLLY_ZOOM || initialMode == CameraMode.RAW_VIDEO) {
+        if (initialMode == CameraMode.VIDEO || initialMode == CameraMode.CINEMA || initialMode == CameraMode.DOLLY_ZOOM) {
             _selectedAspectRatio.value = CameraAspectRatio.RATIO_9_16
             engine.setPreviewAspectRatio(16f / 9f)
         } else {
@@ -746,8 +741,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         engine.updatePreviewSettings()
 
-        // Apply true 9:16 aspect ratio for Video, Cinema, and RAW Video modes before session reconfiguration
-        if (mode == CameraMode.VIDEO || mode == CameraMode.CINEMA || mode == CameraMode.DOLLY_ZOOM || mode == CameraMode.RAW_VIDEO) {
+        // Apply true 9:16 aspect ratio for Video and Cinema modes before session reconfiguration
+        if (mode == CameraMode.VIDEO || mode == CameraMode.CINEMA || mode == CameraMode.DOLLY_ZOOM) {
             _selectedAspectRatio.value = CameraAspectRatio.RATIO_9_16
             engine.setPreviewAspectRatio(16f / 9f)
         } else if (mode == CameraMode.PHOTO || mode == CameraMode.PORTRAIT || mode == CameraMode.NIGHT || mode == CameraMode.MORE) {
@@ -1287,7 +1282,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         when (_cameraMode.value) {
             CameraMode.PHOTO, CameraMode.MORE, CameraMode.AI_SUBJECT_TRACKING -> triggerPhotoCapture()
             CameraMode.PORTRAIT -> triggerPortraitCapture()
-            CameraMode.VIDEO, CameraMode.CINEMA, CameraMode.DOLLY_ZOOM, CameraMode.RAW_VIDEO -> triggerVideoCapture()
+            CameraMode.VIDEO, CameraMode.CINEMA, CameraMode.DOLLY_ZOOM -> triggerVideoCapture()
             CameraMode.NIGHT -> triggerNightCapture()
         }
     }

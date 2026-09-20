@@ -307,7 +307,7 @@ fun BottomControlBar(
                                         )
                                     }
                                 }
-                                CameraMode.VIDEO, CameraMode.CINEMA, CameraMode.DOLLY_ZOOM, CameraMode.RAW_VIDEO -> {
+                                CameraMode.VIDEO, CameraMode.CINEMA, CameraMode.DOLLY_ZOOM -> {
                                     if (isRecordingVideo) {
                                         Box(
                                             modifier = Modifier
@@ -626,7 +626,7 @@ fun BottomControlBar(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 val isPhotoMode = (cameraMode == CameraMode.PHOTO || cameraMode == CameraMode.PORTRAIT)
-                                val isVideoMode = (cameraMode == CameraMode.VIDEO || cameraMode == CameraMode.CINEMA || cameraMode == CameraMode.RAW_VIDEO)
+                                val isVideoMode = (cameraMode == CameraMode.VIDEO || cameraMode == CameraMode.CINEMA)
 
                                 Box(
                                     modifier = Modifier

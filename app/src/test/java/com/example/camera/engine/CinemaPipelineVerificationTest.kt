@@ -154,7 +154,7 @@ class CinemaPipelineVerificationTest {
     @Test
     fun testExposureControlsInCinemaPipeline() {
         val baseConfig = CinemaConfig(
-            colorProfile = CinemaColorProfile.REC_709,
+            colorProfile = CinemaColorProfile.NATIVE,
             exposure = 0.0f
         )
         cinemaEngine.updateConfig(baseConfig)
