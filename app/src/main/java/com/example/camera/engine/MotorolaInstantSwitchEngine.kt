@@ -441,24 +441,45 @@ class MotorolaInstantSwitchEngine(
      * Never hardcodes 4000x3000, and never falls back directly to 1920x1080.
      */
     fun getOptimalPhotoSizesForLens(lens: LensInfo): Pair<Size, Size> {
+        val targetId = lens.physicalCameraId ?: lens.cameraId
         val chars = try {
-            cameraManager?.getCameraCharacteristics(lens.cameraId)
+            cameraManager?.getCameraCharacteristics(targetId) ?: cameraManager?.getCameraCharacteristics(lens.cameraId)
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to get characteristics for lens ${lens.cameraId}", e)
+            Log.w(TAG, "Failed to get characteristics for lens $targetId / ${lens.cameraId}", e)
             null
         }
         val map = chars?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         val jpegSizes = map?.getOutputSizes(ImageFormat.JPEG)?.toList() ?: emptyList()
+        val highResJpegSizes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try { map?.getHighResolutionOutputSizes(ImageFormat.JPEG)?.toList() ?: emptyList() } catch (e: Exception) { emptyList() }
+        } else emptyList()
+        val maxResSizes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                val maxResMap = chars?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP_MAXIMUM_RESOLUTION)
+                val m1 = maxResMap?.getOutputSizes(ImageFormat.JPEG)?.toList() ?: emptyList()
+                val m2 = maxResMap?.getHighResolutionOutputSizes(ImageFormat.JPEG)?.toList() ?: emptyList()
+                m1 + m2
+            } catch (e: Exception) { emptyList() }
+        } else emptyList()
+
+        val allJpegSizes = (jpegSizes + highResJpegSizes + maxResSizes).distinctBy { "${it.width}x${it.height}" }
         val yuvSizes = map?.getOutputSizes(ImageFormat.YUV_420_888)?.toList() ?: emptyList()
 
         // 1. Select highest valid JPEG resolution (prefer 4:3 aspect ratio ~1.333)
-        val jpeg43Sizes = jpegSizes.filter { size ->
+        val jpeg43Sizes = allJpegSizes.filter { size ->
             val ratio = maxOf(size.width, size.height).toFloat() / minOf(size.width, size.height).toFloat()
             kotlin.math.abs(ratio - (4f / 3f)) < 0.05f
         }
-        val bestJpeg = jpeg43Sizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
-            ?: jpegSizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
-            ?: Size(3264, 2448) // Native 8MP default if characteristics are missing in test
+        val bestJpeg = if (lens.lensType == LensType.ULTRAWIDE) {
+            // Ultra-Wide native sensor resolution (prefer ~8MP 3264x2448 if present in map, or largest native 4:3)
+            jpeg43Sizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+                ?: allJpegSizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+                ?: Size(3264, 2448)
+        } else {
+            jpeg43Sizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+                ?: allJpegSizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+                ?: Size(4000, 3000)
+        }
 
         // 2. Select highest valid YUV resolution (prefer 4:3 aspect ratio ~1.333)
         val yuv43Sizes = yuvSizes.filter { size ->
@@ -470,7 +491,7 @@ class MotorolaInstantSwitchEngine(
             ?: bestJpeg
 
         val jpegMp = (bestJpeg.width.toLong() * bestJpeg.height.toLong()) / 1_000_000f
-        Log.i(TAG, "[PHOTO_RES] Selected native photo resolution for ${lens.lensType} (cameraId=${lens.cameraId}): " +
+        Log.i(TAG, "[PHOTO_RES] Selected native photo resolution for ${lens.lensType} (targetId=$targetId): " +
                 "JPEG=${bestJpeg.width}x${bestJpeg.height} (~${jpegMp}MP), YUV=${bestYuv.width}x${bestYuv.height}")
         return Pair(bestJpeg, bestYuv)
     }

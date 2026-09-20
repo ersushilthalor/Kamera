@@ -208,7 +208,7 @@ class CinemaSoftwareRecordingEngine(private val context: Context) {
 
         // 2. Wait for video drain thread to finish processing EOS
         try {
-            videoDrainThread?.join(2000)
+            videoDrainThread?.join(250)
         } catch (e: Exception) {
             Log.w(TAG, "Video drain thread join interrupted", e)
         }
@@ -768,9 +768,7 @@ class CinemaSoftwareRecordingEngine(private val context: Context) {
                                 encoder.queueInputBuffer(inputBufferIndex, 0, toWrite, ptsUs, 0)
                             }
                         } else {
-                            try {
-                                Thread.sleep(2)
-                            } catch (ignored: InterruptedException) {}
+                            java.util.concurrent.locks.LockSupport.parkNanos(2_000_000L)
                         }
                     }
                 }
@@ -787,7 +785,7 @@ class CinemaSoftwareRecordingEngine(private val context: Context) {
                         encoder.queueInputBuffer(inputBufferIndex, 0, 0, ptsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                         eosSent = true
                     } else {
-                        Thread.sleep(10)
+                        java.util.concurrent.locks.LockSupport.parkNanos(5_000_000L)
                     }
                 } catch (ignored: Exception) { break }
             }
@@ -879,12 +877,12 @@ class CinemaSoftwareRecordingEngine(private val context: Context) {
         audioRecord = null
 
         try {
-            audioRecordThread?.join(500)
+            audioRecordThread?.join(150)
         } catch (ignored: Exception) {}
         audioRecordThread = null
 
         try {
-            audioDrainThread?.join(500)
+            audioDrainThread?.join(150)
         } catch (ignored: Exception) {}
         audioDrainThread = null
 

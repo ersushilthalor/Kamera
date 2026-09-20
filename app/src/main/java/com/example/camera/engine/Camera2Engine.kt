@@ -229,6 +229,9 @@ class Camera2Engine(private val context: Context) {
     @Volatile
     private var restartPending = false
     private var zoomDebounceJob: Job? = null
+    private val isStartingRecording = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val isStoppingRecording = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val isSwitchingLens = java.util.concurrent.atomic.AtomicBoolean(false)
 
     val cinemaEngine = CinemaEngine(context)
     private val _cinemaConfig = MutableStateFlow(cinemaEngine.config)
@@ -871,101 +874,124 @@ class Camera2Engine(private val context: Context) {
      * Switch active lens
      */
     fun selectLens(lens: LensInfo, preserveZoom: Boolean = false, targetZoom: Float? = null) {
-        val previousLens = _selectedLens.value
-        _selectedLens.value = lens
-
-        if (preserveZoom) {
-            val z = targetZoom ?: currentZoom
-            currentZoom = z
-            _currentZoom.value = z
-            preferences.saveLastLens(lens)
-            preferences.currentZoom = z
-        } else {
-            currentZoom = lens.baseZoomRatio
-            _currentZoom.value = lens.baseZoomRatio
-            preferences.saveLastLens(lens)
-            preferences.currentZoom = lens.baseZoomRatio
+        if (_isRecordingVideo.value || isStartingRecording.get() || isStoppingRecording.get()) {
+            Log.w(TAG, "Lens switch ignored: video recording is active or transitioning")
+            return
         }
-
-        // If same camera ID and same facing, update optical zoom/crop dynamically without restarting hardware
-        if (previousLens?.cameraId == lens.cameraId &&
-            previousLens?.facing == lens.facing &&
-            cameraDevice != null) {
-            updatePreviewSettings()
-            motorolaSwitchEngine.updatePrimaryLens(lens, _availableLenses.value)
+        if (!isSwitchingLens.compareAndSet(false, true)) {
+            Log.d(TAG, "Lens switch already in progress, ignoring duplicate call")
             return
         }
 
-        val switchStartNs = System.nanoTime()
+        try {
+            val previousLens = _selectedLens.value
+            _selectedLens.value = lens
 
-        // 1. Instant Concurrent Switch if target camera session is already streaming in standby
-        if (motorolaSwitchEngine.isConcurrentSessionReady(lens) && !_isRecordingVideo.value) {
-            val bundle = motorolaSwitchEngine.switchConcurrentLens(
-                targetLens = lens,
-                currentDevice = cameraDevice,
-                currentSession = captureSession,
-                currentJpegReader = imageReaderJpeg,
-                currentYuvReader = imageReaderYuv,
-                currentLens = previousLens,
-                switchStartNs = switchStartNs
-            )
-            if (bundle != null) {
-                cameraDevice = bundle.cameraDevice
-                captureSession = bundle.captureSession
-                imageReaderJpeg = bundle.imageReaderJpeg
-                imageReaderYuv = bundle.imageReaderYuv
-                _isCameraReady.value = true
-                inspectCapabilities(lens.cameraId)
+            if (preserveZoom) {
+                val z = targetZoom ?: currentZoom
+                currentZoom = z
+                _currentZoom.value = z
+                preferences.saveLastLens(lens)
+                preferences.currentZoom = z
+            } else {
+                currentZoom = lens.baseZoomRatio
+                _currentZoom.value = lens.baseZoomRatio
+                preferences.saveLastLens(lens)
+                preferences.currentZoom = lens.baseZoomRatio
+            }
 
-                val activeJpegW = bundle.imageReaderJpeg?.width ?: 0
-                val activeJpegH = bundle.imageReaderJpeg?.height ?: 0
-                val activeYuvW = bundle.imageReaderYuv?.width ?: 0
-                val activeYuvH = bundle.imageReaderYuv?.height ?: 0
-                val activeMp = (activeJpegW.toLong() * activeJpegH.toLong()) / 1_000_000f
-                Log.i(TAG, "[PHOTO_RES] Switched active lens to ${lens.lensType}: ImageReader JPEG=${activeJpegW}x${activeJpegH} (~${activeMp}MP), YUV=${activeYuvW}x${activeYuvH}")
-
-                // Update previewRequestBuilder targeting the compositor surface for the newly active lens
-                val targetSurf = if (lens.lensType == LensType.ULTRAWIDE) {
-                    motorolaSwitchEngine.compositor.ultraWideCameraSurface
-                } else {
-                    motorolaSwitchEngine.compositor.mainCameraSurface
-                } ?: previewSurface
-
-                if (targetSurf != null && targetSurf.isValid) {
-                    try {
-                        val newBuilder = bundle.cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                            addTarget(targetSurf)
-                            applyCommonSettings(this)
-                        }
-                        previewRequestBuilder = newBuilder
-                        bundle.captureSession.setRepeatingRequest(newBuilder.build(), captureCallback, backgroundHandler)
-                        if (lens.lensType == LensType.ULTRAWIDE) {
-                            Log.i(TAG, "[UW_SWITCH] target session active")
-                        } else {
-                            Log.i(TAG, "[SWITCH] target session active for ${lens.lensType}")
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to submit repeating preview request on target session for ${lens.lensType}", e)
-                    }
-                }
-
-                val elapsedMs = (System.nanoTime() - switchStartNs) / 1_000_000L
-                Log.i(TAG, "[INSTANT CONCURRENT SWITCH] Switched to ${lens.lensType} in ${elapsedMs}ms (0 sessions recreated)")
+            // If same camera ID and same facing, update optical zoom/crop dynamically without restarting hardware
+            if (previousLens?.cameraId == lens.cameraId &&
+                previousLens?.facing == lens.facing &&
+                cameraDevice != null) {
+                updatePreviewSettings()
+                motorolaSwitchEngine.updatePrimaryLens(lens, _availableLenses.value)
                 return
             }
-        }
 
-        // 2. Fast Handover if target camera was warm in background (non-concurrent HAL):
-        // Only use warm handover if NOT recording video, because warm camera session doesn't have recorderSurface
-        val warmDevice = motorolaSwitchEngine.handoffBackgroundCamera(lens)
-        if (warmDevice != null && !_isRecordingVideo.value) {
+            val switchStartNs = System.nanoTime()
+
+            // 1. Instant Concurrent Switch if target camera session is already streaming in standby
+            if (motorolaSwitchEngine.isConcurrentSessionReady(lens) && !_isRecordingVideo.value) {
+                val bundle = motorolaSwitchEngine.switchConcurrentLens(
+                    targetLens = lens,
+                    currentDevice = cameraDevice,
+                    currentSession = captureSession,
+                    currentJpegReader = imageReaderJpeg,
+                    currentYuvReader = imageReaderYuv,
+                    currentLens = previousLens,
+                    switchStartNs = switchStartNs
+                )
+                if (bundle != null) {
+                    cameraDevice = bundle.cameraDevice
+                    captureSession = bundle.captureSession
+                    imageReaderJpeg = bundle.imageReaderJpeg
+                    imageReaderYuv = bundle.imageReaderYuv
+                    _isCameraReady.value = true
+                    inspectCapabilities(lens.cameraId)
+
+                    val activeJpegW = bundle.imageReaderJpeg?.width ?: 0
+                    val activeJpegH = bundle.imageReaderJpeg?.height ?: 0
+                    val activeYuvW = bundle.imageReaderYuv?.width ?: 0
+                    val activeYuvH = bundle.imageReaderYuv?.height ?: 0
+                    val activeMp = (activeJpegW.toLong() * activeJpegH.toLong()) / 1_000_000f
+                    Log.i(TAG, "[PHOTO_RES] Switched active lens to ${lens.lensType}: ImageReader JPEG=${activeJpegW}x${activeJpegH} (~${activeMp}MP), YUV=${activeYuvW}x${activeYuvH}")
+
+                    val optimalPhotoSize = getOptimalPhotoSizeForLens(lens, lens.cameraId)
+                    if (bundle.imageReaderJpeg == null || (lens.lensType == LensType.ULTRAWIDE && activeJpegW < 2500)) {
+                        Log.i(TAG, "[PHOTO_RES] Updating Ultra-Wide ImageReader to native resolution: ${optimalPhotoSize.width}x${optimalPhotoSize.height}")
+                        setupImageReaders(lens.cameraId)
+                        createCameraCaptureSession()
+                    } else if (activeJpegW > 0 && activeJpegH > 0) {
+                        _selectedPhotoResolution.value = CameraResolution(activeJpegW, activeJpegH, ImageFormat.JPEG)
+                        updatePreviewAspectRatio()
+                    }
+
+                    // Update previewRequestBuilder targeting the compositor surface for the newly active lens
+                    val targetSurf = if (lens.lensType == LensType.ULTRAWIDE) {
+                        motorolaSwitchEngine.compositor.ultraWideCameraSurface
+                    } else {
+                        motorolaSwitchEngine.compositor.mainCameraSurface
+                    } ?: previewSurface
+
+                    if (targetSurf != null && targetSurf.isValid) {
+                        try {
+                            val newBuilder = bundle.cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                                addTarget(targetSurf)
+                                applyCommonSettings(this)
+                            }
+                            previewRequestBuilder = newBuilder
+                            bundle.captureSession.setRepeatingRequest(newBuilder.build(), captureCallback, backgroundHandler)
+                            if (lens.lensType == LensType.ULTRAWIDE) {
+                                Log.i(TAG, "[UW_SWITCH] target session active")
+                            } else {
+                                Log.i(TAG, "[SWITCH] target session active for ${lens.lensType}")
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to submit repeating preview request on target session for ${lens.lensType}", e)
+                        }
+                    }
+
+                    val elapsedMs = (System.nanoTime() - switchStartNs) / 1_000_000L
+                    Log.i(TAG, "[INSTANT CONCURRENT SWITCH] Switched to ${lens.lensType} in ${elapsedMs}ms (0 sessions recreated)")
+                    return
+                }
+            }
+
+            // 2. Fast Handover if target camera was warm in background (non-concurrent HAL):
+            // Only use warm handover if NOT recording video, because warm camera session doesn't have recorderSurface
+            val warmDevice = motorolaSwitchEngine.handoffBackgroundCamera(lens)
+            if (warmDevice != null && !_isRecordingVideo.value) {
+                inspectCapabilities(lens.cameraId)
+                switchWithWarmCamera(warmDevice, lens, switchStartNs)
+                return
+            }
+
             inspectCapabilities(lens.cameraId)
-            switchWithWarmCamera(warmDevice, lens, switchStartNs)
-            return
+            restartCamera()
+        } finally {
+            isSwitchingLens.set(false)
         }
-
-        inspectCapabilities(lens.cameraId)
-        restartCamera()
     }
 
     private fun switchWithWarmCamera(warmDevice: CameraDevice, lens: LensInfo, switchStartNs: Long = System.nanoTime()) {
@@ -1351,6 +1377,66 @@ class Camera2Engine(private val context: Context) {
         }
     }
 
+    /**
+     * Determines the optimal native photo capture resolution for the specified lens.
+     * For 0.5x Ultra-Wide, strictly selects the highest native 4:3 resolution (around 8MP, e.g. 3264x2448).
+     * Never reuses the main camera resolution.
+     */
+    fun getOptimalPhotoSizeForLens(lens: LensInfo?, cameraId: String): Size {
+        val targetId = lens?.physicalCameraId ?: cameraId
+        val chars = try {
+            getCharacteristics(targetId) ?: getCharacteristics(cameraId)
+        } catch (e: Exception) {
+            null
+        }
+        val map = chars?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+        val jpegSizes = map?.getOutputSizes(ImageFormat.JPEG)?.toList() ?: emptyList()
+        val highResSizes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try { map?.getHighResolutionOutputSizes(ImageFormat.JPEG)?.toList() ?: emptyList() } catch (e: Exception) { emptyList() }
+        } else emptyList()
+        val maxResSizes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                val maxResMap = chars?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP_MAXIMUM_RESOLUTION)
+                val m1 = maxResMap?.getOutputSizes(ImageFormat.JPEG)?.toList() ?: emptyList()
+                val m2 = maxResMap?.getHighResolutionOutputSizes(ImageFormat.JPEG)?.toList() ?: emptyList()
+                m1 + m2
+            } catch (e: Exception) { emptyList() }
+        } else emptyList()
+
+        val allSizes = (jpegSizes + highResSizes + maxResSizes).distinctBy { "${it.width}x${it.height}" }
+
+        val isUltraWide = lens?.lensType == LensType.ULTRAWIDE
+        val is50MMode = photoMegapixelMode == PhotoMegapixelMode.M50
+
+        // 4:3 aspect ratio filter (~1.333)
+        val fourThreeSizes = allSizes.filter { size ->
+            val ratio = maxOf(size.width, size.height).toFloat() / minOf(size.width, size.height).toFloat()
+            kotlin.math.abs(ratio - (4f / 3f)) < 0.05f
+        }
+
+        return when {
+            isUltraWide -> {
+                // For 0.5x Ultra-Wide, select highest native 4:3 resolution supported (around 8MP, e.g. 3264x2448)
+                fourThreeSizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+                    ?: allSizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+                    ?: Size(3264, 2448)
+            }
+            is50MMode -> {
+                allSizes.maxByOrNull { it.width.toLong() * it.height.toLong() } ?: Size(4000, 3000)
+            }
+            else -> {
+                val current = _selectedPhotoResolution.value
+                if (current != null && allSizes.any { it.width == current.width && it.height == current.height }) {
+                    Size(current.width, current.height)
+                } else {
+                    fourThreeSizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+                        ?: allSizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+                        ?: Size(4000, 3000)
+                }
+            }
+        }
+    }
+
     private fun setupImageReaders(cameraId: String) {
         try {
             imageReaderJpeg?.close()
@@ -1368,37 +1454,22 @@ class Camera2Engine(private val context: Context) {
         imageReaderYuv = null
 
         val caps = _capabilities.value
-        val supportedPhotoRes = caps.supportedPhotoResolutions
-        val is50MMode = photoMegapixelMode == PhotoMegapixelMode.M50
-        val baseRes = if (is50MMode) {
-            supportedPhotoRes.maxByOrNull { it.width * it.height }
-                ?: _selectedPhotoResolution.value
-                ?: CameraResolution(4000, 3000)
-        } else {
-            _selectedPhotoResolution.value ?: supportedPhotoRes.firstOrNull() ?: CameraResolution(4000, 3000)
-        }
-
-        val photoRes = if (supportedPhotoRes.isNotEmpty() && !supportedPhotoRes.contains(baseRes)) {
-            supportedPhotoRes.filter {
-                val r = maxOf(it.width, it.height).toFloat() / minOf(it.width, it.height).toFloat()
-                kotlin.math.abs(r - (4f / 3f)) < 0.05f
-            }.maxByOrNull { it.width * it.height }
-                ?: supportedPhotoRes.maxByOrNull { it.width * it.height }
-                ?: baseRes
-        } else {
-            baseRes
-        }
+        val activeLens = _selectedLens.value
+        val targetSize = getOptimalPhotoSizeForLens(activeLens, cameraId)
+        _selectedPhotoResolution.value = CameraResolution(targetSize.width, targetSize.height, ImageFormat.JPEG)
 
         try {
             imageReaderJpeg = ImageReader.newInstance(
-                photoRes.width,
-                photoRes.height,
+                targetSize.width,
+                targetSize.height,
                 ImageFormat.JPEG,
                 4
             )
+            val mp = (targetSize.width.toLong() * targetSize.height.toLong()) / 1_000_000f
+            Log.i(TAG, "[PHOTO_RES] Recreated ImageReader for ${activeLens?.lensType} (cameraId=$cameraId): JPEG=${targetSize.width}x${targetSize.height} (~${mp}MP)")
         } catch (t: Throwable) {
-            Log.e(TAG, "Failed to create ImageReader with ${photoRes.width}x${photoRes.height}, falling back to largest supported", t)
-            val fallback = supportedPhotoRes.firstOrNull() ?: CameraResolution(1920, 1080)
+            Log.e(TAG, "Failed to create ImageReader with ${targetSize.width}x${targetSize.height}, falling back to largest supported", t)
+            val fallback = caps.supportedPhotoResolutions.firstOrNull() ?: CameraResolution(1920, 1080)
             try {
                 imageReaderJpeg = ImageReader.newInstance(fallback.width, fallback.height, ImageFormat.JPEG, 4)
             } catch (t2: Throwable) {
@@ -1407,8 +1478,8 @@ class Camera2Engine(private val context: Context) {
         }
 
         try {
-            val yuvWidth = imageReaderJpeg?.width ?: photoRes.width
-            val yuvHeight = imageReaderJpeg?.height ?: photoRes.height
+            val yuvWidth = imageReaderJpeg?.width ?: targetSize.width
+            val yuvHeight = imageReaderJpeg?.height ?: targetSize.height
             imageReaderYuv = ImageReader.newInstance(
                 yuvWidth,
                 yuvHeight,
@@ -2579,7 +2650,7 @@ class Camera2Engine(private val context: Context) {
                     statusText = status
                 )
                 _nightProgress.value = state
-                runBlocking(Dispatchers.Main) { onProgress(state) }
+                engineScope.launch(Dispatchers.Main) { onProgress(state) }
             }
 
             val fusedBitmap = try {
@@ -3582,6 +3653,8 @@ class Camera2Engine(private val context: Context) {
      * Safely releases failed recording resources, restores preview, and notifies error callback.
      */
     private fun cleanupFailedRecording(onError: (String) -> Unit, message: String) {
+        isStartingRecording.set(false)
+        isStoppingRecording.set(false)
         _isRecordingVideo.value = false
         isSoftwareCinemaRecording = false
         videoTimerJob?.cancel()
@@ -3623,17 +3696,24 @@ class Camera2Engine(private val context: Context) {
      * Start Video Recording
      */
     fun startVideoRecording(onError: (String) -> Unit) {
-        if (_isRecordingVideo.value) return
+        if (_isRecordingVideo.value || isStartingRecording.get() || isStoppingRecording.get() || isSwitchingLens.get()) {
+            Log.w(TAG, "startVideoRecording ignored: camera is busy or already recording")
+            return
+        }
+        if (!isStartingRecording.compareAndSet(false, true)) return
 
         val camera = cameraDevice ?: run {
+            isStartingRecording.set(false)
             onError("Camera device not ready")
             return
         }
         val lens = _selectedLens.value ?: run {
+            isStartingRecording.set(false)
             onError("No active lens selected")
             return
         }
         val previewSurf = getActivePreviewSurface() ?: run {
+            isStartingRecording.set(false)
             onError("Preview surface not ready")
             return
         }
@@ -3856,24 +3936,10 @@ class Camera2Engine(private val context: Context) {
 
             activeRecordingSurface = recorderSurface
 
-            // Safely coordinate session transition on camera backgroundHandler
+            // Seamless Camera2 session transition on camera backgroundHandler:
+            // Do NOT close or abort currentSession beforehand; CameraDevice.createCaptureSession
+            // automatically transitions sessions while keeping preview buffers alive.
             backgroundHandler?.post {
-                val currentSession = captureSession
-                if (currentSession != null) {
-                    try {
-                        currentSession.stopRepeating()
-                        currentSession.abortCaptures()
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error stopping repeating on current session before recording", e)
-                    }
-                    try {
-                        currentSession.close()
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error closing current session before recording", e)
-                    }
-                    captureSession = null
-                }
-
                 try {
                     val recordBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
                         addTarget(previewSurf)
@@ -3902,6 +3968,7 @@ class Camera2Engine(private val context: Context) {
                                     mediaRecorder?.start()
                                 }
                                 _isRecordingVideo.value = true
+                                isStartingRecording.set(false)
                                 startVideoTimer()
                             } catch (e: Exception) {
                                 Log.e(TAG, "Failed starting repeating request or recorder", e)
@@ -3949,35 +4016,38 @@ class Camera2Engine(private val context: Context) {
      * Stop Video Recording
      */
     fun stopVideoRecording() {
-        activeRecordingSurface = null
         if (!_isRecordingVideo.value && !isSoftwareCinemaRecording) return
+        if (!isStoppingRecording.compareAndSet(false, true)) return
 
-        try {
-            val isCinema = (currentMode == CameraMode.CINEMA)
-            val fileName = currentVideoFileName ?: "VID_${System.currentTimeMillis()}.mp4"
-            val mimeType = currentVideoMimeType ?: "video/mp4"
-            currentVideoFileName = null
-            currentVideoMimeType = null
+        activeRecordingSurface = null
+        _isRecordingVideo.value = false
+        videoTimerJob?.cancel()
 
-            videoTimerJob?.cancel()
-            _isRecordingVideo.value = false
+        val isCinema = (currentMode == CameraMode.CINEMA)
+        val fileName = currentVideoFileName ?: "VID_${System.currentTimeMillis()}.mp4"
+        val mimeType = currentVideoMimeType ?: "video/mp4"
+        currentVideoFileName = null
+        currentVideoMimeType = null
 
-            val activeLens = _selectedLens.value
-            val isFrontFacing = activeLens?.facing == CameraCharacteristics.LENS_FACING_FRONT
+        val activeLens = _selectedLens.value
+        val isFrontFacing = activeLens?.facing == CameraCharacteristics.LENS_FACING_FRONT
+        val wasSoftwareCinema = isSoftwareCinemaRecording
+        isSoftwareCinemaRecording = false
 
-            if (isSoftwareCinemaRecording) {
-                isSoftwareCinemaRecording = false
-                val recordedFile = try {
-                    cinemaSoftwareRecorder.stopRecording()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error stopping cinema software recorder", e)
-                    null
-                }
-                currentRecordingTempFile = null
+        // Dispatch stop and resource cleanup to background IO so UI thread never freezes
+        engineScope.launch(Dispatchers.IO) {
+            try {
+                if (wasSoftwareCinema) {
+                    val recordedFile = try {
+                        cinemaSoftwareRecorder.stopRecording()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error stopping cinema software recorder", e)
+                        null
+                    }
+                    currentRecordingTempFile = null
 
-                engineScope.launch(Dispatchers.IO) {
-                    try {
-                        if (recordedFile != null && recordedFile.exists() && recordedFile.length() > 0) {
+                    if (recordedFile != null && recordedFile.exists() && recordedFile.length() > 0) {
+                        try {
                             val savedUri = saveVideoToGallery(
                                 tempFile = recordedFile,
                                 fileName = fileName,
@@ -3995,35 +4065,34 @@ class Camera2Engine(private val context: Context) {
                                 )
                                 Log.i(TAG, "Cinema software video successfully saved: size=${recordedFile.length()} bytes, uri=$savedUri")
                             }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed saving cinema recording", e)
+                        } finally {
+                            try { recordedFile.delete() } catch (ignored: Exception) {}
+                            updateStorageStats()
                         }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed saving cinema recording", e)
-                    } finally {
-                        try { recordedFile?.delete() } catch (ignored: Exception) {}
-                        updateStorageStats()
                     }
-                }
-            } else {
-                mediaRecorder?.apply {
-                    try {
-                        stop()
-                    } catch (e: Exception) {
-                        Log.w(TAG, "MediaRecorder stop failed", e)
+                } else {
+                    val mr = mediaRecorder
+                    mediaRecorder = null
+                    mr?.apply {
+                        try {
+                            stop()
+                        } catch (e: Exception) {
+                            Log.w(TAG, "MediaRecorder stop failed", e)
+                        }
+                        try { reset() } catch (ignored: Throwable) {}
+                        try { release() } catch (ignored: Throwable) {}
                     }
-                    try { reset() } catch (ignored: Throwable) {}
-                    try { release() } catch (ignored: Throwable) {}
-                }
-                mediaRecorder = null
 
-                try { videoRecordingFileDescriptor?.close() } catch (ignored: Throwable) {}
-                videoRecordingFileDescriptor = null
+                    try { videoRecordingFileDescriptor?.close() } catch (ignored: Throwable) {}
+                    videoRecordingFileDescriptor = null
 
-                val tempFile = currentRecordingTempFile
-                currentRecordingTempFile = null
+                    val tempFile = currentRecordingTempFile
+                    currentRecordingTempFile = null
 
-                engineScope.launch(Dispatchers.IO) {
-                    try {
-                        if (tempFile != null && tempFile.exists() && tempFile.length() > 0) {
+                    if (tempFile != null && tempFile.exists() && tempFile.length() > 0) {
+                        try {
                             val savedUri = saveVideoToGallery(
                                 tempFile = tempFile,
                                 fileName = fileName,
@@ -4041,39 +4110,22 @@ class Camera2Engine(private val context: Context) {
                                 )
                                 Log.i(TAG, "Hardware recorded video successfully saved: size=${tempFile.length()} bytes, uri=$savedUri")
                             }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error finalizing recorded video", e)
+                        } finally {
+                            try { tempFile.delete() } catch (ignored: Throwable) {}
+                            updateStorageStats()
                         }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error finalizing recorded video", e)
-                    } finally {
-                        try { tempFile?.delete() } catch (ignored: Throwable) {}
-                        updateStorageStats()
                     }
                 }
-            }
-
-            // Restore the standard preview session on the same open CameraDevice
-            backgroundHandler?.post {
-                val curSession = captureSession
-                if (curSession != null) {
-                    try {
-                        curSession.stopRepeating()
-                        curSession.abortCaptures()
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error stopping recording session repeating request", e)
-                    }
-                    try {
-                        curSession.close()
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error closing recording session", e)
-                    }
-                    captureSession = null
+            } catch (e: Exception) {
+                Log.e(TAG, "Error stopping video recording in background", e)
+            } finally {
+                isStoppingRecording.set(false)
+                // Restore standard preview session smoothly on backgroundHandler
+                backgroundHandler?.post {
+                    createCameraCaptureSession()
                 }
-                createCameraCaptureSession()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error stopping video recording", e)
-            backgroundHandler?.post {
-                createCameraCaptureSession()
             }
         }
     }
