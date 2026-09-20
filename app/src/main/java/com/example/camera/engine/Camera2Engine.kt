@@ -842,32 +842,15 @@ class Camera2Engine(private val context: Context) {
         }
     }
 
-    private fun updatePreviewAspectRatio() {
-        if (currentMode == CameraMode.VIDEO || currentMode == CameraMode.CINEMA) {
-            val res = if (currentMode == CameraMode.CINEMA && cinemaConfig.value.selectedResolution != null) {
-                cinemaConfig.value.selectedResolution
-            } else {
-                _selectedVideoResolution.value
-            }
-            if (res != null && res.height > 0) {
-                val w = max(res.width, res.height).toFloat()
-                val h = min(res.width, res.height).toFloat()
-                _previewAspectRatio.value = w / h
-            } else {
-                _previewAspectRatio.value = 16f / 9f
-            }
-            return
+    fun getTargetAspectRatioForMode(mode: CameraMode = currentMode): Float {
+        return when (mode) {
+            CameraMode.PHOTO, CameraMode.PORTRAIT -> 4f / 3f // Fixed 3:4 portrait (sensor landscape 4:3)
+            else -> 16f / 9f // Fixed 9:16 portrait (sensor landscape 16:9)
         }
+    }
 
-        val resolution = _selectedPhotoResolution.value
-        if (resolution != null && resolution.height > 0) {
-            // Standard sensor orientation width > height in landscape, in portrait aspect ratio is width / height
-            val w = max(resolution.width, resolution.height).toFloat()
-            val h = min(resolution.width, resolution.height).toFloat()
-            _previewAspectRatio.value = w / h // e.g. 4/3 = 1.333, 16/9 = 1.777, 20/9 = 2.222
-        } else {
-            _previewAspectRatio.value = 4f / 3f
-        }
+    private fun updatePreviewAspectRatio() {
+        _previewAspectRatio.value = getTargetAspectRatioForMode(currentMode)
     }
 
     /**
@@ -1034,17 +1017,18 @@ class Camera2Engine(private val context: Context) {
                                 cameraDevice = camera
                                 val texture = previewSurfaceTexture ?: return
                                 val optimalSize = _previewBufferSize.value ?: Size(1920, 1080)
-                                val previewW = min(optimalSize.width, optimalSize.height)
-                                val previewH = max(optimalSize.width, optimalSize.height)
+                                val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
+                                val targetW = min(optimalSize.width, optimalSize.height)
+                                val targetH = if (isPhotoOrPortrait) (targetW * 4) / 3 else (targetW * 16) / 9
                                 val cameraW = max(optimalSize.width, optimalSize.height)
                                 val cameraH = min(optimalSize.width, optimalSize.height)
-                                texture.setDefaultBufferSize(previewW, previewH)
+                                texture.setDefaultBufferSize(targetW, targetH)
                                 if (previewSurface == null || !previewSurface!!.isValid) {
                                     try { previewSurface?.release() } catch (ignored: Throwable) {}
                                     previewSurface = Surface(texture)
                                 }
                                 motorolaSwitchEngine.compositor.setDefaultBufferSize(cameraW, cameraH)
-                                motorolaSwitchEngine.compositor.setMainViewfinderSurface(previewSurface, previewW, previewH)
+                                motorolaSwitchEngine.compositor.setMainViewfinderSurface(previewSurface, targetW, targetH)
                                 motorolaSwitchEngine.compositor.switchActiveStream(lens.lensType, switchStartNs)
                                 createCameraCaptureSession()
                                 motorolaSwitchEngine.updatePrimaryLens(lens, _availableLenses.value)
@@ -1085,11 +1069,12 @@ class Camera2Engine(private val context: Context) {
                 cameraDevice = warmDevice
                 val texture = previewSurfaceTexture ?: return@synchronized
                 val optimalSize = _previewBufferSize.value ?: Size(1920, 1080)
-                val previewW = min(optimalSize.width, optimalSize.height)
-                val previewH = max(optimalSize.width, optimalSize.height)
+                val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
+                val targetW = min(optimalSize.width, optimalSize.height)
+                val targetH = if (isPhotoOrPortrait) (targetW * 4) / 3 else (targetW * 16) / 9
                 val cameraW = max(optimalSize.width, optimalSize.height)
                 val cameraH = min(optimalSize.width, optimalSize.height)
-                texture.setDefaultBufferSize(previewW, previewH)
+                texture.setDefaultBufferSize(targetW, targetH)
 
                 val curSurf = previewSurface
                 if (curSurf == null || !curSurf.isValid) {
@@ -1098,7 +1083,7 @@ class Camera2Engine(private val context: Context) {
                 }
 
                 motorolaSwitchEngine.compositor.setDefaultBufferSize(cameraW, cameraH)
-                motorolaSwitchEngine.compositor.setMainViewfinderSurface(previewSurface, previewW, previewH)
+                motorolaSwitchEngine.compositor.setMainViewfinderSurface(previewSurface, targetW, targetH)
                 motorolaSwitchEngine.compositor.switchActiveStream(lens.lensType, switchStartNs)
 
                 setupImageReaders(lens.cameraId)
@@ -1225,7 +1210,7 @@ class Camera2Engine(private val context: Context) {
                     }
                     val previewSizes = map.getOutputSizes(SurfaceTexture::class.java) ?: emptyArray()
 
-                    val targetRatio = _previewAspectRatio.value
+                    val targetRatio = getTargetAspectRatioForMode(currentMode)
                     val maxDim = viewfinderResolution.maxDimension
                     val matchingRatioSizes = previewSizes.filter {
                         val r = max(it.width, it.height).toFloat() / min(it.width, it.height).toFloat()
@@ -1240,13 +1225,14 @@ class Camera2Engine(private val context: Context) {
                         ?: previewSizes.firstOrNull()
                         ?: Size(1920, 1080)
 
-                    val actualRatio = max(optimalPreviewSize.width, optimalPreviewSize.height).toFloat() /
-                            min(optimalPreviewSize.width, optimalPreviewSize.height).toFloat()
-                    _previewAspectRatio.value = actualRatio
+                    _previewAspectRatio.value = targetRatio
                     _previewBufferSize.value = optimalPreviewSize
-                    val previewW = min(optimalPreviewSize.width, optimalPreviewSize.height)
-                    val previewH = max(optimalPreviewSize.width, optimalPreviewSize.height)
-                    texture.setDefaultBufferSize(previewW, previewH)
+                    val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
+                    val targetW = min(optimalPreviewSize.width, optimalPreviewSize.height)
+                    val targetH = if (isPhotoOrPortrait) (targetW * 4) / 3 else (targetW * 16) / 9
+                    val cameraW = max(optimalPreviewSize.width, optimalPreviewSize.height)
+                    val cameraH = min(optimalPreviewSize.width, optimalPreviewSize.height)
+                    texture.setDefaultBufferSize(targetW, targetH)
 
                     // Safely close previous session before reconfiguring
                     try {
@@ -1260,13 +1246,18 @@ class Camera2Engine(private val context: Context) {
                     _isCameraReady.value = false
 
                     // Direct native Surface connection to TextureView
-                    val curSurf = previewSurface
+                    var curSurf = previewSurface
                     if (curSurf == null || !curSurf.isValid) {
                         try {
                             curSurf?.release()
                         } catch (ignored: Exception) {}
-                        previewSurface = Surface(texture)
+                        curSurf = Surface(texture)
+                        previewSurface = curSurf
                     }
+
+                    motorolaSwitchEngine.compositor.setDefaultBufferSize(cameraW, cameraH)
+                    motorolaSwitchEngine.compositor.setMainViewfinderSurface(curSurf, targetW, targetH)
+                    motorolaSwitchEngine.compositor.switchActiveStream(lens.lensType)
 
                     setupImageReaders(lens.cameraId)
                     createCameraCaptureSession()
@@ -1300,18 +1291,19 @@ class Camera2Engine(private val context: Context) {
         val prevTexture = previewSurfaceTexture
         previewSurfaceTexture = texture
         if (texture != null) {
+            val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
             val optimalSize = _previewBufferSize.value ?: Size(1920, 1080)
-            val previewW = min(optimalSize.width, optimalSize.height)
-            val previewH = max(optimalSize.width, optimalSize.height)
+            val targetW = min(optimalSize.width, optimalSize.height)
+            val targetH = if (isPhotoOrPortrait) (targetW * 4) / 3 else (targetW * 16) / 9
             val cameraW = max(optimalSize.width, optimalSize.height)
             val cameraH = min(optimalSize.width, optimalSize.height)
-            texture.setDefaultBufferSize(previewW, previewH)
+            texture.setDefaultBufferSize(targetW, targetH)
             if (previewSurface == null || !previewSurface!!.isValid) {
                 try { previewSurface?.release() } catch (ignored: Throwable) {}
                 previewSurface = Surface(texture)
             }
             motorolaSwitchEngine.compositor.setDefaultBufferSize(cameraW, cameraH)
-            motorolaSwitchEngine.compositor.setMainViewfinderSurface(previewSurface, previewW, previewH)
+            motorolaSwitchEngine.compositor.setMainViewfinderSurface(previewSurface, targetW, targetH)
             motorolaSwitchEngine.compositor.switchActiveStream(_selectedLens.value?.lensType ?: LensType.WIDE)
 
             if (prevTexture != texture || cameraDevice == null) {
@@ -1365,7 +1357,7 @@ class Camera2Engine(private val context: Context) {
             val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return
 
             // Pick optimal preview size matching selected aspect ratio and viewfinderResolution level
-            val targetRatio = _previewAspectRatio.value
+            val targetRatio = getTargetAspectRatioForMode(currentMode)
             val previewSizes = map.getOutputSizes(SurfaceTexture::class.java) ?: emptyArray()
 
             val maxDim = viewfinderResolution.maxDimension
@@ -1382,18 +1374,17 @@ class Camera2Engine(private val context: Context) {
                 ?: previewSizes.firstOrNull()
                 ?: Size(1920, 1080)
 
-            val actualRatio = max(optimalPreviewSize.width, optimalPreviewSize.height).toFloat() /
-                    min(optimalPreviewSize.width, optimalPreviewSize.height).toFloat()
-            _previewAspectRatio.value = actualRatio
+            _previewAspectRatio.value = targetRatio
             val sensorOrient = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
             _sensorOrientation.value = sensorOrient
             _previewBufferSize.value = optimalPreviewSize
-            val previewW = min(optimalPreviewSize.width, optimalPreviewSize.height)
-            val previewH = max(optimalPreviewSize.width, optimalPreviewSize.height)
+            val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
+            val targetW = min(optimalPreviewSize.width, optimalPreviewSize.height)
+            val targetH = if (isPhotoOrPortrait) (targetW * 4) / 3 else (targetW * 16) / 9
             val cameraW = max(optimalPreviewSize.width, optimalPreviewSize.height)
             val cameraH = min(optimalPreviewSize.width, optimalPreviewSize.height)
 
-            texture.setDefaultBufferSize(previewW, previewH)
+            texture.setDefaultBufferSize(targetW, targetH)
             if (previewSurface == null || !previewSurface!!.isValid) {
                 try {
                     previewSurface?.release()
@@ -1402,7 +1393,7 @@ class Camera2Engine(private val context: Context) {
             }
 
             motorolaSwitchEngine.compositor.setDefaultBufferSize(cameraW, cameraH)
-            motorolaSwitchEngine.compositor.setMainViewfinderSurface(previewSurface, previewW, previewH)
+            motorolaSwitchEngine.compositor.setMainViewfinderSurface(previewSurface, targetW, targetH)
             motorolaSwitchEngine.compositor.switchActiveStream(lens.lensType)
             motorolaSwitchEngine.compositor.awaitInitialized(200)
 
@@ -1508,26 +1499,33 @@ class Camera2Engine(private val context: Context) {
             val ratio = maxOf(size.width, size.height).toFloat() / minOf(size.width, size.height).toFloat()
             kotlin.math.abs(ratio - (4f / 3f)) < 0.05f
         }
+        // 16:9 aspect ratio filter (~1.777)
+        val sixteenNineSizes = allSizes.filter { size ->
+            val ratio = maxOf(size.width, size.height).toFloat() / minOf(size.width, size.height).toFloat()
+            kotlin.math.abs(ratio - (16f / 9f)) < 0.05f
+        }
+
+        val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
 
         return when {
-            isUltraWide -> {
-                // For 0.5x Ultra-Wide, select highest native 4:3 resolution supported (around 8MP, e.g. 3264x2448)
-                fourThreeSizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
-                    ?: allSizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
-                    ?: Size(3264, 2448)
-            }
-            is50MMode -> {
-                allSizes.maxByOrNull { it.width.toLong() * it.height.toLong() } ?: Size(4000, 3000)
-            }
-            else -> {
-                val current = _selectedPhotoResolution.value
-                if (current != null && allSizes.any { it.width == current.width && it.height == current.height }) {
-                    Size(current.width, current.height)
+            isPhotoOrPortrait -> {
+                if (isUltraWide) {
+                    // For 0.5x Ultra-Wide, select highest native 4:3 resolution supported (around 8MP, e.g. 3264x2448)
+                    fourThreeSizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+                        ?: allSizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+                        ?: Size(3264, 2448)
+                } else if (is50MMode) {
+                    allSizes.maxByOrNull { it.width.toLong() * it.height.toLong() } ?: Size(4000, 3000)
                 } else {
                     fourThreeSizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
                         ?: allSizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
                         ?: Size(4000, 3000)
                 }
+            }
+            else -> {
+                sixteenNineSizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+                    ?: allSizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+                    ?: Size(1920, 1080)
             }
         }
     }

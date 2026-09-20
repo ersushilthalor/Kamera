@@ -103,20 +103,16 @@ fun Viewfinder(
         val containerWidth = maxWidth
         val containerHeight = maxHeight
 
-        // Expected aspect ratio for current mode (portrait display: height / width)
-        // 4:3 Photo -> 4f / 3f = 1.333f
-        // 16:9 Video/Cinema -> 16f / 9f = 1.777f
-        val targetRatio = if (aspectRatio > 0.1f) {
-            if (aspectRatio < 1.0f) 1f / aspectRatio else aspectRatio
-        } else {
-            when (cameraMode) {
-                CameraMode.VIDEO, CameraMode.CINEMA, CameraMode.DOLLY_ZOOM -> 16f / 9f
-                else -> 4f / 3f
-            }
+        // Enforce fixed aspect ratios strictly dictated by mode:
+        // - Photo mode: fixed 3:4 (portrait 3:4 -> height / width = 4 / 3)
+        // - Portrait mode: fixed 3:4 (portrait 3:4 -> height / width = 4 / 3)
+        // - All other modes (Video, Cinema, Night, Dolly Zoom, More, etc.): fixed 9:16 (portrait 9:16 -> height / width = 16 / 9)
+        val targetRatio = when (cameraMode) {
+            CameraMode.PHOTO, CameraMode.PORTRAIT -> 4f / 3f
+            else -> 16f / 9f
         }
 
-        // Viewfinder spans dimensions dictated strictly by the native camera output aspect ratio,
-        // fitting cleanly within the container bounds with letterboxing/pillarboxing as appropriate.
+        // Viewfinder spans dimensions dictated strictly by the mode's native aspect ratio
         val (targetWidth, targetHeight) = if (containerWidth * targetRatio <= containerHeight) {
             containerWidth to (containerWidth * targetRatio)
         } else {
@@ -179,13 +175,14 @@ fun Viewfinder(
                 AndroidView(
                     factory = { context ->
                         TextureView(context).apply {
+                            setTransform(null)
                             surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                                 override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
-                                    configureTextureViewTransform(this@apply, w, h, previewBufferSize, targetRatio)
+                                    setTransform(null)
                                     onSurfaceTextureAvailable(st)
                                 }
                                 override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
-                                    configureTextureViewTransform(this@apply, w, h, previewBufferSize, targetRatio)
+                                    setTransform(null)
                                 }
                                 override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
                                     onSurfaceTextureAvailable(null)
@@ -196,7 +193,7 @@ fun Viewfinder(
                         }
                     },
                     update = { textureView ->
-                        configureTextureViewTransform(textureView, textureView.width, textureView.height, previewBufferSize, targetRatio)
+                        textureView.setTransform(null)
                         val effectiveLut = activeLut ?: cinemaConfig?.selectedLut
                         val effectiveLutPreview = isLutPreviewEnabled || (cinemaConfig?.isLutPreviewEnabled == true)
 
@@ -605,46 +602,4 @@ fun CameraGridOverlay(
     }
 }
 
-/**
- * Configure TextureView transform matrix to ensure the preview occupies the intended
- * aspect-ratio area cleanly without stretching, rotating, or leaving empty black areas above.
- */
-private fun configureTextureViewTransform(
-    textureView: TextureView,
-    viewWidth: Int,
-    viewHeight: Int,
-    previewBufferSize: CameraSize?,
-    targetRatio: Float
-) {
-    if (viewWidth <= 0 || viewHeight <= 0) return
-    val matrix = Matrix()
-
-    // Determine the buffer dimensions matching this portrait view.
-    // In portrait, the camera buffer height > width:
-    val bufW = if (previewBufferSize != null && previewBufferSize.width > 0 && previewBufferSize.height > 0) {
-        min(previewBufferSize.width, previewBufferSize.height).toFloat()
-    } else {
-        viewWidth.toFloat()
-    }
-    val bufH = if (previewBufferSize != null && previewBufferSize.width > 0 && previewBufferSize.height > 0) {
-        max(previewBufferSize.width, previewBufferSize.height).toFloat()
-    } else {
-        bufW * (if (targetRatio > 0.1f) targetRatio else (16f / 9f))
-    }
-
-    // Center-crop / fit to ensure preview occupies the intended area without the huge black region
-    val scaleX = viewWidth.toFloat() / bufW
-    val scaleY = viewHeight.toFloat() / bufH
-    val scale = max(scaleX, scaleY)
-
-    val scaledW = bufW * scale
-    val scaledH = bufH * scale
-    val dx = (viewWidth - scaledW) / 2f
-    val dy = (viewHeight - scaledH) / 2f
-
-    // Keep camera orientation exactly as it is now - do NOT rotate, do NOT stretch
-    matrix.setScale(scale, scale)
-    matrix.postTranslate(dx, dy)
-    textureView.setTransform(matrix)
-}
 

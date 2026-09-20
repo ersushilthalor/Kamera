@@ -530,13 +530,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         engine.setCinemaConfig(preferences.getCinemaConfig())
         engine.updateHybridStabilizationConfig(preferences.hybridStabilizationConfig)
 
-        // Restore initial mode aspect ratio
-        if (initialMode == CameraMode.VIDEO || initialMode == CameraMode.CINEMA || initialMode == CameraMode.DOLLY_ZOOM) {
-            _selectedAspectRatio.value = CameraAspectRatio.RATIO_9_16
-            engine.setPreviewAspectRatio(16f / 9f)
-        } else {
+        // Restore initial mode aspect ratio:
+        // - Photo mode: fixed 3:4
+        // - Portrait mode: fixed 3:4
+        // - All other modes (Video, Cinema, etc.): fixed 9:16
+        if (initialMode == CameraMode.PHOTO || initialMode == CameraMode.PORTRAIT) {
             _selectedAspectRatio.value = CameraAspectRatio.RATIO_4_3
             engine.setPreviewAspectRatio(4f / 3f)
+        } else {
+            _selectedAspectRatio.value = CameraAspectRatio.RATIO_9_16
+            engine.setPreviewAspectRatio(16f / 9f)
         }
 
         viewModelScope.launch {
@@ -741,13 +744,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         engine.updatePreviewSettings()
 
-        // Apply true 9:16 aspect ratio for Video and Cinema modes before session reconfiguration
-        if (mode == CameraMode.VIDEO || mode == CameraMode.CINEMA || mode == CameraMode.DOLLY_ZOOM) {
-            _selectedAspectRatio.value = CameraAspectRatio.RATIO_9_16
-            engine.setPreviewAspectRatio(16f / 9f)
-        } else if (mode == CameraMode.PHOTO || mode == CameraMode.PORTRAIT || mode == CameraMode.NIGHT || mode == CameraMode.MORE) {
+        // Apply strictly required aspect ratios:
+        // - Photo mode: fixed 3:4
+        // - Portrait mode: fixed 3:4
+        // - All other modes (Video, Cinema, etc.): fixed 9:16
+        if (mode == CameraMode.PHOTO || mode == CameraMode.PORTRAIT) {
             _selectedAspectRatio.value = CameraAspectRatio.RATIO_4_3
             engine.setPreviewAspectRatio(4f / 3f)
+        } else {
+            _selectedAspectRatio.value = CameraAspectRatio.RATIO_9_16
+            engine.setPreviewAspectRatio(16f / 9f)
         }
 
         if (mode == CameraMode.AI_SUBJECT_TRACKING) {
