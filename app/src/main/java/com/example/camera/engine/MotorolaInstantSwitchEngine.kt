@@ -810,16 +810,25 @@ class MotorolaInstantSwitchEngine(
     }
 
     /**
-     * Fallback handover if concurrent streaming is not available.
+     * Fallback handover if concurrent streaming is not available or for seamless video recording switch.
      */
+    fun getStandbyCameraDevice(targetLens: LensInfo): CameraDevice? {
+        synchronized(sessionLock) {
+            val bgDevice = standbyCameraDevice ?: return null
+            if (activeStandbyLens?.cameraId == targetLens.cameraId || activeStandbyLens?.lensType == targetLens.lensType) {
+                return bgDevice
+            }
+            return null
+        }
+    }
+
     fun handoffBackgroundCamera(targetLens: LensInfo): CameraDevice? {
         synchronized(sessionLock) {
             val bgDevice = standbyCameraDevice ?: return null
-            if (activeStandbyLens?.cameraId != targetLens.cameraId) return null
+            if (activeStandbyLens?.cameraId != targetLens.cameraId && activeStandbyLens?.lensType != targetLens.lensType) return null
 
-            Log.i(TAG, "Handover fallback: Promoting background camera ${bgDevice.id} to primary")
+            Log.i(TAG, "Handover: Promoting background camera ${bgDevice.id} to primary")
             try {
-                standbyCaptureSession?.stopRepeating()
                 standbyCaptureSession?.close()
             } catch (ignored: Throwable) {}
             standbyCaptureSession = null

@@ -173,16 +173,20 @@ fun Viewfinder(
                     }
             ) {
                 // 100% Native Camera2 TextureView Preview:
-                // No custom processing, transformations, orientation pipelines, scaling hacks,
-                // stretching, rotation, or cropping. Output comes directly from Camera2 pipeline.
+                // Correctly match Camera2 buffer dimensions with the preview view dimensions
+                // using proper center-crop/fit transform so the preview occupies the intended
+                // aspect ratio area without the huge black region.
                 AndroidView(
                     factory = { context ->
                         TextureView(context).apply {
                             surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                                 override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
+                                    configureTextureViewTransform(this@apply, w, h, previewBufferSize, targetRatio)
                                     onSurfaceTextureAvailable(st)
                                 }
-                                override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
+                                override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
+                                    configureTextureViewTransform(this@apply, w, h, previewBufferSize, targetRatio)
+                                }
                                 override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
                                     onSurfaceTextureAvailable(null)
                                     return true
@@ -192,6 +196,7 @@ fun Viewfinder(
                         }
                     },
                     update = { textureView ->
+                        configureTextureViewTransform(textureView, textureView.width, textureView.height, previewBufferSize, targetRatio)
                         val effectiveLut = activeLut ?: cinemaConfig?.selectedLut
                         val effectiveLutPreview = isLutPreviewEnabled || (cinemaConfig?.isLutPreviewEnabled == true)
 
@@ -599,3 +604,47 @@ fun CameraGridOverlay(
         }
     }
 }
+
+/**
+ * Configure TextureView transform matrix to ensure the preview occupies the intended
+ * aspect-ratio area cleanly without stretching, rotating, or leaving empty black areas above.
+ */
+private fun configureTextureViewTransform(
+    textureView: TextureView,
+    viewWidth: Int,
+    viewHeight: Int,
+    previewBufferSize: CameraSize?,
+    targetRatio: Float
+) {
+    if (viewWidth <= 0 || viewHeight <= 0) return
+    val matrix = Matrix()
+
+    // Determine the buffer dimensions matching this portrait view.
+    // In portrait, the camera buffer height > width:
+    val bufW = if (previewBufferSize != null && previewBufferSize.width > 0 && previewBufferSize.height > 0) {
+        min(previewBufferSize.width, previewBufferSize.height).toFloat()
+    } else {
+        viewWidth.toFloat()
+    }
+    val bufH = if (previewBufferSize != null && previewBufferSize.width > 0 && previewBufferSize.height > 0) {
+        max(previewBufferSize.width, previewBufferSize.height).toFloat()
+    } else {
+        bufW * (if (targetRatio > 0.1f) targetRatio else (16f / 9f))
+    }
+
+    // Center-crop / fit to ensure preview occupies the intended area without the huge black region
+    val scaleX = viewWidth.toFloat() / bufW
+    val scaleY = viewHeight.toFloat() / bufH
+    val scale = max(scaleX, scaleY)
+
+    val scaledW = bufW * scale
+    val scaledH = bufH * scale
+    val dx = (viewWidth - scaledW) / 2f
+    val dy = (viewHeight - scaledH) / 2f
+
+    // Keep camera orientation exactly as it is now - do NOT rotate, do NOT stretch
+    matrix.setScale(scale, scale)
+    matrix.postTranslate(dx, dy)
+    textureView.setTransform(matrix)
+}
+

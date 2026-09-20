@@ -874,8 +874,8 @@ class Camera2Engine(private val context: Context) {
      * Switch active lens
      */
     fun selectLens(lens: LensInfo, preserveZoom: Boolean = false, targetZoom: Float? = null) {
-        if (_isRecordingVideo.value || isStartingRecording.get() || isStoppingRecording.get()) {
-            Log.w(TAG, "Lens switch ignored: video recording is active or transitioning")
+        if (isStartingRecording.get() || isStoppingRecording.get()) {
+            Log.w(TAG, "Lens switch ignored: video recording is transitioning")
             return
         }
         if (!isSwitchingLens.compareAndSet(false, true)) {
@@ -906,13 +906,31 @@ class Camera2Engine(private val context: Context) {
                 cameraDevice != null) {
                 updatePreviewSettings()
                 motorolaSwitchEngine.updatePrimaryLens(lens, _availableLenses.value)
+                motorolaSwitchEngine.compositor.switchActiveStream(lens.lensType)
                 return
             }
 
             val switchStartNs = System.nanoTime()
 
+            // Seamless lens switch during active video recording
+            if (_isRecordingVideo.value) {
+                Log.i(TAG, "[RECORDING_SWITCH] Switching active lens during video recording to ${lens.lensType} (Camera ID: ${lens.cameraId})")
+                val warmDevice = motorolaSwitchEngine.handoffBackgroundCamera(lens)
+                    ?: motorolaSwitchEngine.getStandbyCameraDevice(lens)
+                if (warmDevice != null) {
+                    inspectCapabilities(lens.cameraId)
+                    switchWithWarmCamera(warmDevice, lens, switchStartNs)
+                    motorolaSwitchEngine.compositor.switchActiveStream(lens.lensType, switchStartNs)
+                    return
+                }
+                // Target camera device not pre-warmed: seamlessly switch recording pipeline without stopping MediaRecorder
+                inspectCapabilities(lens.cameraId)
+                switchCameraDuringRecording(lens, switchStartNs)
+                return
+            }
+
             // 1. Instant Concurrent Switch if target camera session is already streaming in standby
-            if (motorolaSwitchEngine.isConcurrentSessionReady(lens) && !_isRecordingVideo.value) {
+            if (motorolaSwitchEngine.isConcurrentSessionReady(lens)) {
                 val bundle = motorolaSwitchEngine.switchConcurrentLens(
                     targetLens = lens,
                     currentDevice = cameraDevice,
@@ -979,9 +997,8 @@ class Camera2Engine(private val context: Context) {
             }
 
             // 2. Fast Handover if target camera was warm in background (non-concurrent HAL):
-            // Only use warm handover if NOT recording video, because warm camera session doesn't have recorderSurface
             val warmDevice = motorolaSwitchEngine.handoffBackgroundCamera(lens)
-            if (warmDevice != null && !_isRecordingVideo.value) {
+            if (warmDevice != null) {
                 inspectCapabilities(lens.cameraId)
                 switchWithWarmCamera(warmDevice, lens, switchStartNs)
                 return
@@ -991,6 +1008,66 @@ class Camera2Engine(private val context: Context) {
             restartCamera()
         } finally {
             isSwitchingLens.set(false)
+        }
+    }
+
+    private fun switchCameraDuringRecording(lens: LensInfo, switchStartNs: Long) {
+        val mgr = cameraManager ?: return
+        startBackgroundThread()
+        backgroundHandler?.post {
+            synchronized(cameraLifecycleLock) {
+                val oldSession = captureSession
+                val oldDevice = cameraDevice
+                captureSession = null
+                try {
+                    oldSession?.close()
+                } catch (ignored: Throwable) {}
+                try {
+                    oldDevice?.close()
+                } catch (ignored: Throwable) {}
+                cameraDevice = null
+
+                try {
+                    mgr.openCamera(lens.cameraId, object : CameraDevice.StateCallback() {
+                        override fun onOpened(camera: CameraDevice) {
+                            synchronized(cameraLifecycleLock) {
+                                cameraDevice = camera
+                                val texture = previewSurfaceTexture ?: return
+                                val optimalSize = _previewBufferSize.value ?: Size(1920, 1080)
+                                val previewW = min(optimalSize.width, optimalSize.height)
+                                val previewH = max(optimalSize.width, optimalSize.height)
+                                val cameraW = max(optimalSize.width, optimalSize.height)
+                                val cameraH = min(optimalSize.width, optimalSize.height)
+                                texture.setDefaultBufferSize(previewW, previewH)
+                                if (previewSurface == null || !previewSurface!!.isValid) {
+                                    try { previewSurface?.release() } catch (ignored: Throwable) {}
+                                    previewSurface = Surface(texture)
+                                }
+                                motorolaSwitchEngine.compositor.setDefaultBufferSize(cameraW, cameraH)
+                                motorolaSwitchEngine.compositor.setMainViewfinderSurface(previewSurface, previewW, previewH)
+                                motorolaSwitchEngine.compositor.switchActiveStream(lens.lensType, switchStartNs)
+                                createCameraCaptureSession()
+                                motorolaSwitchEngine.updatePrimaryLens(lens, _availableLenses.value)
+                                val elapsedMs = (System.nanoTime() - switchStartNs) / 1_000_000L
+                                Log.i(TAG, "[RECORDING_SWITCH] Seamless lens switch to ${lens.lensType} completed in ${elapsedMs}ms")
+                            }
+                        }
+
+                        override fun onDisconnected(camera: CameraDevice) {
+                            camera.close()
+                            if (cameraDevice == camera) cameraDevice = null
+                        }
+
+                        override fun onError(camera: CameraDevice, error: Int) {
+                            Log.e(TAG, "Error opening camera ${lens.cameraId} during recording: $error")
+                            camera.close()
+                            if (cameraDevice == camera) cameraDevice = null
+                        }
+                    }, backgroundHandler)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to open camera ${lens.cameraId} during recording", e)
+                }
+            }
         }
     }
 
@@ -1008,13 +1085,21 @@ class Camera2Engine(private val context: Context) {
                 cameraDevice = warmDevice
                 val texture = previewSurfaceTexture ?: return@synchronized
                 val optimalSize = _previewBufferSize.value ?: Size(1920, 1080)
-                texture.setDefaultBufferSize(optimalSize.width, optimalSize.height)
+                val previewW = min(optimalSize.width, optimalSize.height)
+                val previewH = max(optimalSize.width, optimalSize.height)
+                val cameraW = max(optimalSize.width, optimalSize.height)
+                val cameraH = min(optimalSize.width, optimalSize.height)
+                texture.setDefaultBufferSize(previewW, previewH)
 
                 val curSurf = previewSurface
                 if (curSurf == null || !curSurf.isValid) {
                     try { curSurf?.release() } catch (ignored: Throwable) {}
                     previewSurface = Surface(texture)
                 }
+
+                motorolaSwitchEngine.compositor.setDefaultBufferSize(cameraW, cameraH)
+                motorolaSwitchEngine.compositor.setMainViewfinderSurface(previewSurface, previewW, previewH)
+                motorolaSwitchEngine.compositor.switchActiveStream(lens.lensType, switchStartNs)
 
                 setupImageReaders(lens.cameraId)
                 createCameraCaptureSession()
@@ -1159,7 +1244,9 @@ class Camera2Engine(private val context: Context) {
                             min(optimalPreviewSize.width, optimalPreviewSize.height).toFloat()
                     _previewAspectRatio.value = actualRatio
                     _previewBufferSize.value = optimalPreviewSize
-                    texture.setDefaultBufferSize(optimalPreviewSize.width, optimalPreviewSize.height)
+                    val previewW = min(optimalPreviewSize.width, optimalPreviewSize.height)
+                    val previewH = max(optimalPreviewSize.width, optimalPreviewSize.height)
+                    texture.setDefaultBufferSize(previewW, previewH)
 
                     // Safely close previous session before reconfiguring
                     try {
@@ -1214,13 +1301,17 @@ class Camera2Engine(private val context: Context) {
         previewSurfaceTexture = texture
         if (texture != null) {
             val optimalSize = _previewBufferSize.value ?: Size(1920, 1080)
-            texture.setDefaultBufferSize(optimalSize.width, optimalSize.height)
+            val previewW = min(optimalSize.width, optimalSize.height)
+            val previewH = max(optimalSize.width, optimalSize.height)
+            val cameraW = max(optimalSize.width, optimalSize.height)
+            val cameraH = min(optimalSize.width, optimalSize.height)
+            texture.setDefaultBufferSize(previewW, previewH)
             if (previewSurface == null || !previewSurface!!.isValid) {
                 try { previewSurface?.release() } catch (ignored: Throwable) {}
                 previewSurface = Surface(texture)
             }
-            motorolaSwitchEngine.compositor.setDefaultBufferSize(optimalSize.width, optimalSize.height)
-            motorolaSwitchEngine.compositor.setMainViewfinderSurface(previewSurface, optimalSize.width, optimalSize.height)
+            motorolaSwitchEngine.compositor.setDefaultBufferSize(cameraW, cameraH)
+            motorolaSwitchEngine.compositor.setMainViewfinderSurface(previewSurface, previewW, previewH)
             motorolaSwitchEngine.compositor.switchActiveStream(_selectedLens.value?.lensType ?: LensType.WIDE)
 
             if (prevTexture != texture || cameraDevice == null) {
@@ -1297,8 +1388,12 @@ class Camera2Engine(private val context: Context) {
             val sensorOrient = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
             _sensorOrientation.value = sensorOrient
             _previewBufferSize.value = optimalPreviewSize
+            val previewW = min(optimalPreviewSize.width, optimalPreviewSize.height)
+            val previewH = max(optimalPreviewSize.width, optimalPreviewSize.height)
+            val cameraW = max(optimalPreviewSize.width, optimalPreviewSize.height)
+            val cameraH = min(optimalPreviewSize.width, optimalPreviewSize.height)
 
-            texture.setDefaultBufferSize(optimalPreviewSize.width, optimalPreviewSize.height)
+            texture.setDefaultBufferSize(previewW, previewH)
             if (previewSurface == null || !previewSurface!!.isValid) {
                 try {
                     previewSurface?.release()
@@ -1306,8 +1401,8 @@ class Camera2Engine(private val context: Context) {
                 previewSurface = Surface(texture)
             }
 
-            motorolaSwitchEngine.compositor.setDefaultBufferSize(optimalPreviewSize.width, optimalPreviewSize.height)
-            motorolaSwitchEngine.compositor.setMainViewfinderSurface(previewSurface, optimalPreviewSize.width, optimalPreviewSize.height)
+            motorolaSwitchEngine.compositor.setDefaultBufferSize(cameraW, cameraH)
+            motorolaSwitchEngine.compositor.setMainViewfinderSurface(previewSurface, previewW, previewH)
             motorolaSwitchEngine.compositor.switchActiveStream(lens.lensType)
             motorolaSwitchEngine.compositor.awaitInitialized(200)
 
@@ -1541,17 +1636,21 @@ class Camera2Engine(private val context: Context) {
         val recSurface = activeRecordingSurface
         if (isRecording && recSurface != null && recSurface.isValid) {
             try {
-                val surfaces = listOf(previewSurf, recSurface)
                 val template = CameraDevice.TEMPLATE_RECORD
                 previewRequestBuilder = camera.createCaptureRequest(template).apply {
                     addTarget(previewSurf)
                     addTarget(recSurface)
                     applyCommonSettings(this)
+                    set(CaptureRequest.CONTROL_CAPTURE_INTENT, CaptureRequest.CONTROL_CAPTURE_INTENT_VIDEO_RECORD)
                 }
 
-                camera.createCaptureSession(
-                    surfaces,
-                    object : CameraCaptureSession.StateCallback() {
+                val is10BitMode = currentMode == CameraMode.CINEMA && cinemaConfig.value.logBitDepth == LogBitDepth.BIT_10
+                createRecordingCaptureSession(
+                    camera = camera,
+                    previewSurface = previewSurf,
+                    recorderSurface = recSurface,
+                    is10Bit = is10BitMode,
+                    callback = object : CameraCaptureSession.StateCallback() {
                         override fun onConfigured(session: CameraCaptureSession) {
                             isConfiguringSession = false
                             if (cameraDevice == null) return
@@ -1572,8 +1671,7 @@ class Camera2Engine(private val context: Context) {
                             Log.e(TAG, "Failed to configure video recording session after lens switch")
                             _isCameraReady.value = false
                         }
-                    },
-                    backgroundHandler
+                    }
                 )
                 return
             } catch (e: Exception) {

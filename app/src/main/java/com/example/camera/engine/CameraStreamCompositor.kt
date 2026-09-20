@@ -18,6 +18,8 @@ import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.max
+import kotlin.math.min
 
 private const val TAG = "StreamCompositor"
 
@@ -344,9 +346,11 @@ class CameraStreamCompositor {
     }
 
     fun setDefaultBufferSize(width: Int, height: Int) {
+        val camW = if (width > 0 && height > 0) max(width, height) else 1920
+        val camH = if (width > 0 && height > 0) min(width, height) else 1080
         glHandler?.post {
-            mainCameraSurfaceTexture?.setDefaultBufferSize(width, height)
-            ultraWideCameraSurfaceTexture?.setDefaultBufferSize(width, height)
+            mainCameraSurfaceTexture?.setDefaultBufferSize(camW, camH)
+            ultraWideCameraSurfaceTexture?.setDefaultBufferSize(camW, camH)
         }
     }
 
@@ -370,8 +374,11 @@ class CameraStreamCompositor {
             }
 
             mainTargetSurface = surface
-            mainWidth = if (width > 0) width else 1080
-            mainHeight = if (height > 0) height else 1920
+            // The viewfinder preview on a portrait device requires portrait orientation dimensions:
+            val pWidth = if (width > 0 && height > 0) min(width, height) else if (width > 0) width else 1080
+            val pHeight = if (width > 0 && height > 0) max(width, height) else if (height > 0) height else 1920
+            mainWidth = pWidth
+            mainHeight = pHeight
 
             if (surface != null && surface.isValid && display != null && eglConfig != null) {
                 val surfaceAttribs = intArrayOf(EGL14.EGL_NONE)
