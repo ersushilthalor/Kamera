@@ -59,6 +59,12 @@ class CameraStreamCompositor {
     private var littleWidth: Int = 240
     private var littleHeight: Int = 320
 
+    // Native Camera Frame Buffer Dimensions (input from Camera2 HAL, always landscape)
+    @Volatile
+    private var cameraBufferWidth: Int = 1920
+    @Volatile
+    private var cameraBufferHeight: Int = 1080
+
     // Persistent Camera Streams
     var mainCameraSurfaceTexture: SurfaceTexture? = null
         private set
@@ -348,6 +354,8 @@ class CameraStreamCompositor {
     fun setDefaultBufferSize(width: Int, height: Int) {
         val camW = if (width > 0 && height > 0) max(width, height) else 1920
         val camH = if (width > 0 && height > 0) min(width, height) else 1080
+        cameraBufferWidth = camW
+        cameraBufferHeight = camH
         glHandler?.post {
             mainCameraSurfaceTexture?.setDefaultBufferSize(camW, camH)
             ultraWideCameraSurfaceTexture?.setDefaultBufferSize(camW, camH)
@@ -464,7 +472,7 @@ class CameraStreamCompositor {
     fun getFrameCount(lens: LensType): Long = if (lens == LensType.ULTRAWIDE) ultraWideFrameSequence.get() else mainFrameSequence.get()
     fun getTimestamp(lens: LensType): Long = if (lens == LensType.ULTRAWIDE) lastUltraWideTimestampNs.get() else lastMainTimestampNs.get()
 
-    private fun triggerRender() {
+    fun triggerRender() {
         if (isRenderPending.compareAndSet(false, true)) {
             glHandler?.post {
                 isRenderPending.set(false)
@@ -584,8 +592,55 @@ class CameraStreamCompositor {
 
         if (mainSurf != null && targetTexId != 0) {
             EGL14.eglMakeCurrent(display, mainSurf, mainSurf, ctx)
-            GLES20.glViewport(0, 0, mainWidth, mainHeight)
-            drawQuad(targetTexId, targetTexMatrix)
+            val surfWidthArr = IntArray(1)
+            val surfHeightArr = IntArray(1)
+            EGL14.eglQuerySurface(display, mainSurf, EGL14.EGL_WIDTH, surfWidthArr, 0)
+            EGL14.eglQuerySurface(display, mainSurf, EGL14.EGL_HEIGHT, surfHeightArr, 0)
+            val dstW = if (surfWidthArr[0] > 0) surfWidthArr[0] else mainWidth
+            val dstH = if (surfHeightArr[0] > 0) surfHeightArr[0] else mainHeight
+            GLES20.glViewport(0, 0, dstW, dstH)
+
+            // Source camera buffer aspect ratio in portrait orientation:
+            // Camera sensors are natively landscape (e.g. 1920x1080 for 16:9, or 1440x1080 for 4:3).
+            // In a portrait viewfinder, sensor width maps to height and sensor height maps to width.
+            val camLong = max(cameraBufferWidth, cameraBufferHeight).toFloat()
+            val camShort = min(cameraBufferWidth, cameraBufferHeight).toFloat()
+            val srcAspect = if (camShort > 0f) camLong / camShort else (16f / 9f)
+
+            // Destination viewfinder aspect ratio in portrait orientation:
+            val dstLong = max(dstW, dstH).toFloat()
+            val dstShort = min(dstW, dstH).toFloat()
+            val dstAspect = if (dstShort > 0f) dstLong / dstShort else (16f / 9f)
+
+            var scaleX = 1.0f
+            var scaleY = 1.0f
+            if (kotlin.math.abs(dstAspect - srcAspect) >= 0.01f) {
+                if (dstAspect > srcAspect) {
+                    // Destination is taller/narrower than source (e.g. 9:16 dest vs 3:4 source).
+                    // Preserve true height and center-crop width without stretching.
+                    scaleX = srcAspect / dstAspect
+                    scaleY = 1.0f
+                } else {
+                    // Destination is wider/shorter than source (e.g. 3:4 dest vs 16:9 source).
+                    // Preserve true width and center-crop height without stretching.
+                    scaleX = 1.0f
+                    scaleY = dstAspect / srcAspect
+                }
+            }
+
+            val finalTexMatrix = FloatArray(16)
+            if (scaleX == 1.0f && scaleY == 1.0f) {
+                System.arraycopy(targetTexMatrix, 0, finalTexMatrix, 0, 16)
+            } else {
+                val cropMatrix = FloatArray(16)
+                android.opengl.Matrix.setIdentityM(cropMatrix, 0)
+                android.opengl.Matrix.translateM(cropMatrix, 0, 0.5f, 0.5f, 0.0f)
+                android.opengl.Matrix.scaleM(cropMatrix, 0, scaleX, scaleY, 1.0f)
+                android.opengl.Matrix.translateM(cropMatrix, 0, -0.5f, -0.5f, 0.0f)
+                android.opengl.Matrix.multiplyMM(finalTexMatrix, 0, targetTexMatrix, 0, cropMatrix, 0)
+            }
+
+            drawQuad(targetTexId, finalTexMatrix)
             EGL14.eglSwapBuffers(display, mainSurf)
             if (targetTexId == ultraWideTexId) {
                 val seq = ultraWideFrameSequence.get()

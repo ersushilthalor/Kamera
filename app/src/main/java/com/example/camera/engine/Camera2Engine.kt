@@ -1018,11 +1018,10 @@ class Camera2Engine(private val context: Context) {
                                 val texture = previewSurfaceTexture ?: return
                                 val optimalSize = _previewBufferSize.value ?: Size(1920, 1080)
                                 val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
-                                val targetW = min(optimalSize.width, optimalSize.height)
-                                val targetH = if (isPhotoOrPortrait) (targetW * 4) / 3 else (targetW * 16) / 9
+                                val targetW = if (viewfinderWidth > 0) viewfinderWidth else 1080
+                                val targetH = if (viewfinderHeight > 0) viewfinderHeight else if (isPhotoOrPortrait) 1440 else 1920
                                 val cameraW = max(optimalSize.width, optimalSize.height)
                                 val cameraH = min(optimalSize.width, optimalSize.height)
-                                texture.setDefaultBufferSize(targetW, targetH)
                                 if (previewSurface == null || !previewSurface!!.isValid) {
                                     try { previewSurface?.release() } catch (ignored: Throwable) {}
                                     previewSurface = Surface(texture)
@@ -1070,11 +1069,10 @@ class Camera2Engine(private val context: Context) {
                 val texture = previewSurfaceTexture ?: return@synchronized
                 val optimalSize = _previewBufferSize.value ?: Size(1920, 1080)
                 val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
-                val targetW = min(optimalSize.width, optimalSize.height)
-                val targetH = if (isPhotoOrPortrait) (targetW * 4) / 3 else (targetW * 16) / 9
+                val targetW = if (viewfinderWidth > 0) viewfinderWidth else 1080
+                val targetH = if (viewfinderHeight > 0) viewfinderHeight else if (isPhotoOrPortrait) 1440 else 1920
                 val cameraW = max(optimalSize.width, optimalSize.height)
                 val cameraH = min(optimalSize.width, optimalSize.height)
-                texture.setDefaultBufferSize(targetW, targetH)
 
                 val curSurf = previewSurface
                 if (curSurf == null || !curSurf.isValid) {
@@ -1228,11 +1226,10 @@ class Camera2Engine(private val context: Context) {
                     _previewAspectRatio.value = targetRatio
                     _previewBufferSize.value = optimalPreviewSize
                     val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
-                    val targetW = min(optimalPreviewSize.width, optimalPreviewSize.height)
-                    val targetH = if (isPhotoOrPortrait) (targetW * 4) / 3 else (targetW * 16) / 9
+                    val targetW = if (viewfinderWidth > 0) viewfinderWidth else 1080
+                    val targetH = if (viewfinderHeight > 0) viewfinderHeight else if (isPhotoOrPortrait) 1440 else 1920
                     val cameraW = max(optimalPreviewSize.width, optimalPreviewSize.height)
                     val cameraH = min(optimalPreviewSize.width, optimalPreviewSize.height)
-                    texture.setDefaultBufferSize(targetW, targetH)
 
                     // Safely close previous session before reconfiguring
                     try {
@@ -1284,25 +1281,53 @@ class Camera2Engine(private val context: Context) {
         }
     }
 
+    @Volatile
+    private var viewfinderWidth: Int = 0
+    @Volatile
+    private var viewfinderHeight: Int = 0
+
+    fun onViewfinderSurfaceSizeChanged(texture: SurfaceTexture, width: Int, height: Int) {
+        previewSurfaceTexture = texture
+        if (width > 0 && height > 0) {
+            viewfinderWidth = width
+            viewfinderHeight = height
+        }
+        var curSurf = previewSurface
+        if (curSurf == null || !curSurf.isValid) {
+            try { curSurf?.release() } catch (ignored: Throwable) {}
+            curSurf = Surface(texture)
+            previewSurface = curSurf
+        }
+        val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
+        val targetW = if (viewfinderWidth > 0) viewfinderWidth else 1080
+        val targetH = if (viewfinderHeight > 0) viewfinderHeight else if (isPhotoOrPortrait) 1440 else 1920
+        motorolaSwitchEngine.compositor.setMainViewfinderSurface(curSurf, targetW, targetH)
+        motorolaSwitchEngine.compositor.triggerRender()
+    }
+
     /**
      * Attach viewfinder surface texture from Compose AndroidView
      */
-    fun setPreviewSurfaceTexture(texture: SurfaceTexture?) {
+    fun setPreviewSurfaceTexture(texture: SurfaceTexture?, width: Int = 0, height: Int = 0) {
         val prevTexture = previewSurfaceTexture
         previewSurfaceTexture = texture
+        if (width > 0 && height > 0) {
+            viewfinderWidth = width
+            viewfinderHeight = height
+        }
         if (texture != null) {
             val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
             val optimalSize = _previewBufferSize.value ?: Size(1920, 1080)
-            val targetW = min(optimalSize.width, optimalSize.height)
-            val targetH = if (isPhotoOrPortrait) (targetW * 4) / 3 else (targetW * 16) / 9
             val cameraW = max(optimalSize.width, optimalSize.height)
             val cameraH = min(optimalSize.width, optimalSize.height)
-            texture.setDefaultBufferSize(targetW, targetH)
+
             if (previewSurface == null || !previewSurface!!.isValid) {
                 try { previewSurface?.release() } catch (ignored: Throwable) {}
                 previewSurface = Surface(texture)
             }
             motorolaSwitchEngine.compositor.setDefaultBufferSize(cameraW, cameraH)
+            val targetW = if (viewfinderWidth > 0) viewfinderWidth else 1080
+            val targetH = if (viewfinderHeight > 0) viewfinderHeight else if (isPhotoOrPortrait) 1440 else 1920
             motorolaSwitchEngine.compositor.setMainViewfinderSurface(previewSurface, targetW, targetH)
             motorolaSwitchEngine.compositor.switchActiveStream(_selectedLens.value?.lensType ?: LensType.WIDE)
 
@@ -1379,12 +1404,11 @@ class Camera2Engine(private val context: Context) {
             _sensorOrientation.value = sensorOrient
             _previewBufferSize.value = optimalPreviewSize
             val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
-            val targetW = min(optimalPreviewSize.width, optimalPreviewSize.height)
-            val targetH = if (isPhotoOrPortrait) (targetW * 4) / 3 else (targetW * 16) / 9
+            val targetW = if (viewfinderWidth > 0) viewfinderWidth else 1080
+            val targetH = if (viewfinderHeight > 0) viewfinderHeight else if (isPhotoOrPortrait) 1440 else 1920
             val cameraW = max(optimalPreviewSize.width, optimalPreviewSize.height)
             val cameraH = min(optimalPreviewSize.width, optimalPreviewSize.height)
 
-            texture.setDefaultBufferSize(targetW, targetH)
             if (previewSurface == null || !previewSurface!!.isValid) {
                 try {
                     previewSurface?.release()

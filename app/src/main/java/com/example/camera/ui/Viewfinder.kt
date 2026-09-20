@@ -82,6 +82,7 @@ fun Viewfinder(
     cinemaConfig: CinemaConfig? = null,
     rec2020AutoToneParams: com.example.camera.engine.Rec2020AutoToneParams? = null,
     onSurfaceTextureAvailable: (SurfaceTexture?) -> Unit,
+    onSurfaceTextureSizeChanged: ((SurfaceTexture, Int, Int) -> Unit)? = null,
     onTapToFocus: (Offset, Float, Float) -> Unit,
     onZoomChange: (Float) -> Unit,
     onExposureCompensationChange: (Int) -> Unit = {},
@@ -175,14 +176,13 @@ fun Viewfinder(
                 AndroidView(
                     factory = { context ->
                         TextureView(context).apply {
-                            setTransform(null)
                             surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                                 override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
-                                    setTransform(null)
                                     onSurfaceTextureAvailable(st)
+                                    onSurfaceTextureSizeChanged?.invoke(st, w, h)
                                 }
                                 override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
-                                    setTransform(null)
+                                    onSurfaceTextureSizeChanged?.invoke(st, w, h)
                                 }
                                 override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
                                     onSurfaceTextureAvailable(null)
@@ -193,7 +193,6 @@ fun Viewfinder(
                         }
                     },
                     update = { textureView ->
-                        textureView.setTransform(null)
                         val effectiveLut = activeLut ?: cinemaConfig?.selectedLut
                         val effectiveLutPreview = isLutPreviewEnabled || (cinemaConfig?.isLutPreviewEnabled == true)
 

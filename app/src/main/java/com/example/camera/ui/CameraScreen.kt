@@ -270,6 +270,9 @@ fun CameraScreen(
             onSurfaceTextureAvailable = { texture ->
                 viewModel.engine.setPreviewSurfaceTexture(texture)
             },
+            onSurfaceTextureSizeChanged = { texture, width, height ->
+                viewModel.engine.onViewfinderSurfaceSizeChanged(texture, width, height)
+            },
             onTapToFocus = { point, normX, normY ->
                 viewModel.onTapToFocus(point, normX, normY)
             },
