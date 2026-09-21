@@ -244,6 +244,9 @@ class Camera2Engine(private val context: Context) {
 
     val ultraRes50MStacker = UltraRes50MStacker(context)
     val refocusEngine = RefocusEngine(context)
+    val realtime8kUpscaleRecorder = Realtime8kUpscaleRecorder(context)
+    private val _isRefocusBurstActive = MutableStateFlow(false)
+    val isRefocusBurstActive: StateFlow<Boolean> = _isRefocusBurstActive.asStateFlow()
     val highQualityZoomEngine = com.example.camera.zoom.HighQualityZoomEngine.getInstance(context)
     var photoMegapixelMode: PhotoMegapixelMode = PhotoMegapixelMode.M12
     var isRefocusPhotoEnabled: Boolean = false
@@ -3042,22 +3045,44 @@ class Camera2Engine(private val context: Context) {
         val lastFocusDiopters = lastCaptureResult?.get(CaptureResult.LENS_FOCUS_DISTANCE)
             ?: (effectiveMinDist * 0.35f)
 
-        val frameCount = refocusFrameCount.coerceIn(5, 20)
+        val frameCount = refocusFrameCount.coerceIn(3, 20)
         val focusPlanes = FloatArray(frameCount)
-        for (i in 0 until frameCount) {
-            val fraction = i.toFloat() / (frameCount - 1).coerceAtLeast(1)
-            // Sweep from maximum focus (closest near) down to 0.0 (infinity/far)
-            focusPlanes[i] = (effectiveMinDist * (1.0f - fraction)).coerceIn(0f, effectiveMinDist)
-        }
+        var bestMidIndex = 0
 
-        // Identify the frame closest to current user AF distance for instant saving as default gallery photo
-        var bestMidIndex = frameCount / 2
-        var minDiff = Float.MAX_VALUE
-        for (i in 0 until frameCount) {
-            val diff = kotlin.math.abs(focusPlanes[i] - lastFocusDiopters)
-            if (diff < minDiff) {
-                minDiff = diff
-                bestMidIndex = i
+        if (frameCount == 3) {
+            // Exactly SUBJECT -> NEAR -> FAR:
+            // 0: SUBJECT = user selected focus distance
+            // 1: NEAR = closer focus distance (higher diopters)
+            // 2: FAR = farther focus distance (lower diopters / infinity)
+            val subjectDiopters = lastFocusDiopters
+            val nearDiopters = if (subjectDiopters < effectiveMinDist) {
+                (subjectDiopters + (effectiveMinDist - subjectDiopters) * 0.55f).coerceIn(subjectDiopters + 0.3f, effectiveMinDist)
+            } else {
+                effectiveMinDist
+            }
+            val farDiopters = (subjectDiopters * 0.25f).coerceIn(0f, maxOf(0f, subjectDiopters - 0.2f))
+
+            focusPlanes[0] = subjectDiopters
+            focusPlanes[1] = nearDiopters
+            focusPlanes[2] = farDiopters
+            bestMidIndex = 0 // SUBJECT frame is saved as the primary gallery photo
+            Log.i(TAG, "Refocus 3-frame setup: SUBJECT=$subjectDiopters, NEAR=$nearDiopters, FAR=$farDiopters")
+        } else {
+            for (i in 0 until frameCount) {
+                val fraction = i.toFloat() / (frameCount - 1).coerceAtLeast(1)
+                // Sweep from maximum focus (closest near) down to 0.0 (infinity/far)
+                focusPlanes[i] = (effectiveMinDist * (1.0f - fraction)).coerceIn(0f, effectiveMinDist)
+            }
+
+            // Identify the frame closest to current user AF distance for instant saving as default gallery photo
+            bestMidIndex = frameCount / 2
+            var minDiff = Float.MAX_VALUE
+            for (i in 0 until frameCount) {
+                val diff = kotlin.math.abs(focusPlanes[i] - lastFocusDiopters)
+                if (diff < minDiff) {
+                    minDiff = diff
+                    bestMidIndex = i
+                }
             }
         }
 
@@ -3067,10 +3092,44 @@ class Camera2Engine(private val context: Context) {
 
         var framesReceived = 0
         val isCompleted = java.util.concurrent.atomic.AtomicBoolean(false)
+        val actualCapturedDiopters = FloatArray(frameCount) { focusPlanes[it] }
+
+        // Lock live preview so focus changes (Near/Far) are internal to capture pipeline only.
+        // The live preview remains visually locked on SUBJECT throughout the entire burst.
+        motorolaSwitchEngine.compositor.isPreviewFocusLocked = true
+        _isRefocusBurstActive.value = true
+        val originalAfMode = previewRequestBuilder?.get(CaptureRequest.CONTROL_AF_MODE) ?: CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+
+        try {
+            session.stopRepeating()
+        } catch (ignored: Exception) {}
+
+        fun restorePreviewAf() {
+            try {
+                previewRequestBuilder?.let { builder ->
+                    builder.set(CaptureRequest.CONTROL_AF_MODE, originalAfMode)
+                    if (originalAfMode == CaptureRequest.CONTROL_AF_MODE_OFF) {
+                        builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, lastFocusDiopters)
+                    }
+                    applyCommonSettings(builder)
+                    session.setRepeatingRequest(builder.build(), captureCallback, backgroundHandler)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed restoring repeating preview after refocus burst", e)
+            } finally {
+                motorolaSwitchEngine.compositor.isPreviewFocusLocked = false
+                motorolaSwitchEngine.compositor.triggerRender()
+                engineScope.launch(Dispatchers.Main) {
+                    kotlinx.coroutines.delay(60)
+                    _isRefocusBurstActive.value = false
+                }
+            }
+        }
 
         fun finalizeRefocusCapture() {
             if (!isCompleted.compareAndSet(false, true)) return
             readerJpeg.setOnImageAvailableListener(null, null)
+            restorePreviewAf()
             engineScope.launch(Dispatchers.IO) {
                 var finalUri: Uri? = null
                 try {
@@ -3084,7 +3143,7 @@ class Camera2Engine(private val context: Context) {
                             refocusEngine.processAndPersistPlanes(
                                 photoUri = finalUri,
                                 tempPlaneFiles = tempPlaneFiles,
-                                planeDiopters = focusPlanes.toList()
+                                planeDiopters = actualCapturedDiopters.toList()
                             )
                         }
                     }
@@ -3130,8 +3189,12 @@ class Camera2Engine(private val context: Context) {
                     applyCommonSettings(this)
                     set(CaptureRequest.JPEG_ORIENTATION, getCaptureJpegOrientation())
                     set(CaptureRequest.JPEG_QUALITY, 95.toByte())
+                    // Lock AE/AWB across burst frames to prevent exposure/balance drift
+                    set(CaptureRequest.CONTROL_AE_LOCK, true)
+                    set(CaptureRequest.CONTROL_AWB_LOCK, true)
                     set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
                     set(CaptureRequest.LENS_FOCUS_DISTANCE, focusPlanes[i])
+                    setTag(i)
                 }
                 requests.add(req.build())
             }
@@ -3142,7 +3205,12 @@ class Camera2Engine(private val context: Context) {
                     request: CaptureRequest,
                     result: TotalCaptureResult
                 ) {
-                    Log.d(TAG, "Refocus burst plane completed")
+                    val tagIndex = request.tag as? Int ?: 0
+                    val actualDist = result.get(CaptureResult.LENS_FOCUS_DISTANCE)
+                    if (actualDist != null && tagIndex in 0 until frameCount) {
+                        actualCapturedDiopters[tagIndex] = actualDist
+                    }
+                    Log.d(TAG, "Refocus burst plane $tagIndex completed (req=${focusPlanes[tagIndex]}, actual=$actualDist)")
                 }
                 override fun onCaptureFailed(
                     session: CameraCaptureSession,
@@ -3160,6 +3228,7 @@ class Camera2Engine(private val context: Context) {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed submitting refocus burst, falling back to standard capture", e)
+            restorePreviewAf()
             tempPlaneFiles.forEach { runCatching { it.delete() } }
             takePhoto(onComplete)
         }
@@ -3961,7 +4030,37 @@ class Camera2Engine(private val context: Context) {
 
             // Setup recording target surface
             val recorderSurface: Surface
-            if (isSoftwareCinema) {
+            if (is8kRequested) {
+                // 8K REAL-TIME GPU UPSCALE:
+                // 4K (3840x2160) input -> Realtime 2x GPU Upscale shader -> 8K (7680x4320) HEVC Encoder
+                try {
+                    val colorMatrix = if (isCinema) {
+                        CinemaColorPipeline.computeCinemaColorMatrix(
+                            config = cinemaEngine.config,
+                            rec2020Params = rec2020AutoToneParams.value
+                        ) ?: CinemaColorPipeline.computeHollywoodColorMatrix(
+                            preferences.cinemaSelectedHollywoodGrade,
+                            preferences.cinemaGradeIntensity
+                        )
+                    } else null
+
+                    recorderSurface = realtime8kUpscaleRecorder.startRecording(
+                        destFile = tempFile,
+                        fps = minOf(targetFps, 30),
+                        bitrate = 80_000_000,
+                        isAudioEnabled = isAudioEnabled,
+                        orientationHint = getVideoOrientationHint(),
+                        colorMatrix = colorMatrix?.array
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "8K Real-Time Upscale encoder failed", e)
+                    isCurrentRecording8K = false
+                    _isRecordingVideo.value = false
+                    isStartingRecording.set(false)
+                    onError("8K Real-Time Upscale Error: Device 8K HEVC hardware encoder initialization failed. Recording aborted.")
+                    return
+                }
+            } else if (isSoftwareCinema) {
                 isSoftwareCinemaRecording = true
                 recorderSurface = cinemaSoftwareRecorder.startRecording(
                     destFile = tempFile,
@@ -4210,6 +4309,43 @@ class Camera2Engine(private val context: Context) {
                             updateStorageStats()
                         }
                     }
+                } else if (isCurrentRecording8K) {
+                    try {
+                        val file = realtime8kUpscaleRecorder.stopRecording()
+                        currentRecordingTempFile = file
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error stopping 8K real-time upscale recording", e)
+                    }
+
+                    val tempFile = currentRecordingTempFile
+                    currentRecordingTempFile = null
+
+                    if (tempFile != null && tempFile.exists() && tempFile.length() > 0) {
+                        try {
+                            val savedUri = saveVideoToGallery(
+                                tempFile = tempFile,
+                                fileName = fileName,
+                                mimeType = "video/mp4",
+                                isCinema = isCinema,
+                                isFrontFacing = isFrontFacing
+                            )
+                            if (savedUri != null) {
+                                _lastCapturedMedia.value = CapturedMedia(
+                                    uri = savedUri,
+                                    isVideo = true,
+                                    timestamp = System.currentTimeMillis(),
+                                    displayName = if (isCinema) "Cinema 8K Video" else "8K UHD Video",
+                                    isFrontCamera = isFrontFacing
+                                )
+                                Log.i(TAG, "8K real-time upscaled video saved: size=${tempFile.length()} bytes, uri=$savedUri")
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error finalizing 8K recorded video", e)
+                        } finally {
+                            try { tempFile.delete() } catch (ignored: Throwable) {}
+                            updateStorageStats()
+                        }
+                    }
                 } else {
                     val mr = mediaRecorder
                     mediaRecorder = null
@@ -4298,10 +4434,16 @@ class Camera2Engine(private val context: Context) {
         }
 
         val is8kSession = isCurrentRecording8K
-        val needsColorGrade = cinemaColorMatrix != null
-        val needsMirror = isFrontFacing
-        val needs8kUpscale = is8kSession
-        val needsExportPipeline = needsColorGrade || needsMirror || needs8kUpscale
+        if (is8kSession) {
+            if (!tempFile.exists() || tempFile.length() <= 0L) {
+                Log.e(TAG, "8K recorded file is empty or missing; aborting without 4K fallback")
+                return@withContext null
+            }
+        }
+
+        val needsColorGrade = cinemaColorMatrix != null && !is8kSession
+        val needsMirror = isFrontFacing && !is8kSession
+        val needsExportPipeline = needsColorGrade || needsMirror
 
         var exportedFile: File? = null
         val fileToSave: File = if (needsExportPipeline) {
@@ -4311,12 +4453,7 @@ class Camera2Engine(private val context: Context) {
                     inputFile = tempFile,
                     outputFile = targetExport,
                     isMirrored = needsMirror,
-                    colorMatrix = cinemaColorMatrix?.array,
-                    targetWidth = if (needs8kUpscale) 7680 else null,
-                    targetHeight = if (needs8kUpscale) 4320 else null,
-                    targetBitrate = if (needs8kUpscale) 80_000_000 else null,
-                    forceHevc = needs8kUpscale,
-                    useHighQualityUpscale = needs8kUpscale
+                    colorMatrix = cinemaColorMatrix?.array
                 )
             } catch (e: Exception) {
                 Log.w(TAG, "Video export transcoding failed", e)
@@ -4339,6 +4476,10 @@ class Camera2Engine(private val context: Context) {
         val contentValues = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
             put(MediaStore.Video.Media.MIME_TYPE, mimeType)
+            if (is8kSession) {
+                put(MediaStore.Video.Media.WIDTH, 7680)
+                put(MediaStore.Video.Media.HEIGHT, 4320)
+            }
             put(MediaStore.Video.Media.DATE_ADDED, System.currentTimeMillis() / 1000)
             put(MediaStore.Video.Media.DATE_TAKEN, System.currentTimeMillis())
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

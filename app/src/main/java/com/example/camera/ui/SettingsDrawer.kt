@@ -397,10 +397,10 @@ fun SettingsDrawer(
                                 SamsungRowItem(
                                     icon = Icons.Outlined.Layers,
                                     title = "Focus Planes",
-                                    subtitle = "$refocusFrameCount focus planes captured per burst"
+                                    subtitle = if (refocusFrameCount == 3) "3 frames: Subject → Near → Far" else "$refocusFrameCount focus planes captured per burst"
                                 ) {
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        listOf(5, 8, 12, 15).forEach { count ->
+                                        listOf(3, 5, 8, 12, 15).forEach { count ->
                                             SamsungSmallChip(
                                                 label = "${count}p",
                                                 isSelected = refocusFrameCount == count,

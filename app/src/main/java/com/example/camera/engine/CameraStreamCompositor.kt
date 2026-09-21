@@ -80,6 +80,10 @@ class CameraStreamCompositor {
     private var mainTexId: Int = 0
     private var ultraWideTexId: Int = 0
 
+    // Preview Lock for Refocus Capture
+    @Volatile
+    var isPreviewFocusLocked: Boolean = false
+
     // Transform matrices (populated by SurfaceTexture.getTransformMatrix)
     private val mainTexMatrix = FloatArray(16)
     private val ultraWideTexMatrix = FloatArray(16)
@@ -491,12 +495,14 @@ class CameraStreamCompositor {
         // 1. Consume available frames to keep both hardware pipelines flowing & 3A converged
         if (mainFrameAvailable.compareAndSet(true, false)) {
             try {
-                mainCameraSurfaceTexture?.updateTexImage()
-                mainCameraSurfaceTexture?.getTransformMatrix(mainTexMatrix)
-                val ts = mainCameraSurfaceTexture?.timestamp ?: 0L
-                lastMainTimestampNs.set(ts)
-                hasValidMainTexture = true
-                newMainFrame = true
+                if (!isPreviewFocusLocked) {
+                    mainCameraSurfaceTexture?.updateTexImage()
+                    mainCameraSurfaceTexture?.getTransformMatrix(mainTexMatrix)
+                    val ts = mainCameraSurfaceTexture?.timestamp ?: 0L
+                    lastMainTimestampNs.set(ts)
+                    hasValidMainTexture = true
+                    newMainFrame = true
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "Error updating main texture image", e)
             }

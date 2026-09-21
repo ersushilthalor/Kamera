@@ -90,8 +90,8 @@ class CameraPreferences(context: Context) {
         set(value) = prefs.edit().putBoolean(KEY_REFOCUS_PHOTO_ENABLED, value).apply()
 
     var refocusFrameCount: Int
-        get() = prefs.getInt(KEY_REFOCUS_FRAME_COUNT, 5).coerceIn(5, 20)
-        set(value) = prefs.edit().putInt(KEY_REFOCUS_FRAME_COUNT, value.coerceIn(5, 20)).apply()
+        get() = prefs.getInt(KEY_REFOCUS_FRAME_COUNT, 5).coerceIn(3, 20)
+        set(value) = prefs.edit().putInt(KEY_REFOCUS_FRAME_COUNT, value.coerceIn(3, 20)).apply()
 
     var cameraMode: CameraMode
         get() {

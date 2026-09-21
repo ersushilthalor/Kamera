@@ -122,6 +122,7 @@ fun CameraScreen(
     val photoMegapixelMode by viewModel.photoMegapixelMode.collectAsStateWithLifecycle()
     val isRefocusPhotoEnabled by viewModel.isRefocusPhotoEnabled.collectAsStateWithLifecycle()
     val refocusFrameCount by viewModel.refocusFrameCount.collectAsStateWithLifecycle()
+    val isRefocusBurstActive by viewModel.isRefocusBurstActive.collectAsStateWithLifecycle()
     val isVideoSettingsPanelOpen by viewModel.isVideoSettingsPanelOpen.collectAsStateWithLifecycle()
 
     val cinemaConfig by viewModel.cinemaConfig.collectAsStateWithLifecycle()
@@ -268,6 +269,7 @@ fun CameraScreen(
             isLutPreviewEnabled = cinemaConfig.isLutPreviewEnabled,
             cinemaConfig = cinemaConfig,
             rec2020AutoToneParams = rec2020AutoToneParams,
+            isRefocusBurstActive = isRefocusBurstActive,
             onSurfaceTextureAvailable = { texture ->
                 viewModel.engine.setPreviewSurfaceTexture(texture)
             },

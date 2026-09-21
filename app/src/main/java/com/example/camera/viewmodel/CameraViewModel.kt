@@ -155,8 +155,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val _refocusFrameCount = MutableStateFlow(preferences.getModeRefocusFrameCount(preferences.cameraMode))
     val refocusFrameCount: StateFlow<Int> = _refocusFrameCount.asStateFlow()
 
+    val isRefocusBurstActive: StateFlow<Boolean> = engine.isRefocusBurstActive
+
     fun setRefocusFrameCount(count: Int) {
-        val clamped = count.coerceIn(5, 20)
+        val clamped = count.coerceIn(3, 20)
         _refocusFrameCount.value = clamped
         preferences.refocusFrameCount = clamped
         preferences.setModeRefocusFrameCount(_cameraMode.value, clamped)

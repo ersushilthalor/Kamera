@@ -70,20 +70,34 @@ class RefocusEngine(private val context: Context) {
             val count = tempPlaneFiles.size
             val savedFiles = mutableListOf<File>()
 
+            // Save raw plane files
             for (i in 0 until count) {
-                val dest = File(bundleDir, "plane_$i.jpg")
+                val dest = File(bundleDir, "plane_raw_$i.jpg")
                 copyFile(tempPlaneFiles[i], dest)
                 tempPlaneFiles[i].delete()
                 savedFiles.add(dest)
             }
 
             // Set near, mid, far paths for legacy compatibility
-            val nearDest = savedFiles.first()
-            val midDest = savedFiles[count / 2]
-            val farDest = savedFiles.last()
+            // In 3-frame mode: index 0 is SUBJECT (mid), index 1 is NEAR, index 2 is FAR
+            val nearDest = if (count == 3) savedFiles[1] else savedFiles.first()
+            val midDest = if (count == 3) savedFiles[0] else savedFiles[count / 2]
+            val farDest = if (count == 3) savedFiles[2] else savedFiles.last()
             copyFile(nearDest, File(bundleDir, "plane_near.jpg"))
             copyFile(midDest, File(bundleDir, "plane_mid.jpg"))
             copyFile(farDest, File(bundleDir, "plane_far.jpg"))
+
+            // Also map standard indexed planes:
+            // plane_0 = near (depth 0.0), plane_1 = mid/subject (depth 0.5), plane_2 = far (depth 1.0)
+            if (count == 3) {
+                copyFile(nearDest, File(bundleDir, "plane_0.jpg"))
+                copyFile(midDest, File(bundleDir, "plane_1.jpg"))
+                copyFile(farDest, File(bundleDir, "plane_2.jpg"))
+            } else {
+                for (i in 0 until count) {
+                    copyFile(savedFiles[i], File(bundleDir, "plane_$i.jpg"))
+                }
+            }
 
             // Read dimensions from mid plane without decoding pixels
             val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -121,21 +135,35 @@ class RefocusEngine(private val context: Context) {
                 }
             }
 
-            // Synthesize normalized depth field (0.0=plane 0/near, 1.0=plane N-1/far)
+            // Synthesize normalized depth field (0.0=near, 1.0=far)
             val totalPixels = proxyW * proxyH
             val depthArray = FloatArray(totalPixels)
             for (idx in 0 until totalPixels) {
-                var sumEnergy = 0f
-                var weightedIndex = 0f
-                for (p in 0 until count) {
-                    val e = energyList[p].getOrElse(idx) { 0f }
-                    sumEnergy += e
-                    weightedIndex += e * (p.toFloat() / (count - 1).coerceAtLeast(1))
-                }
-                depthArray[idx] = if (sumEnergy > 1e-4f) {
-                    (weightedIndex / sumEnergy).coerceIn(0f, 1f)
+                if (count == 3) {
+                    // 3-frame mode: index 0 = SUBJECT (mid 0.5), index 1 = NEAR (0.0), index 2 = FAR (1.0)
+                    val eSubject = energyList[0].getOrElse(idx) { 0f }
+                    val eNear = energyList[1].getOrElse(idx) { 0f }
+                    val eFar = energyList[2].getOrElse(idx) { 0f }
+                    val sumEnergy = eNear + eSubject + eFar
+                    val weightedDepth = eNear * 0.0f + eSubject * 0.5f + eFar * 1.0f
+                    depthArray[idx] = if (sumEnergy > 1e-4f) {
+                        (weightedDepth / sumEnergy).coerceIn(0f, 1f)
+                    } else {
+                        0.5f
+                    }
                 } else {
-                    0.5f
+                    var sumEnergy = 0f
+                    var weightedIndex = 0f
+                    for (p in 0 until count) {
+                        val e = energyList[p].getOrElse(idx) { 0f }
+                        sumEnergy += e
+                        weightedIndex += e * (p.toFloat() / (count - 1).coerceAtLeast(1))
+                    }
+                    depthArray[idx] = if (sumEnergy > 1e-4f) {
+                        (weightedIndex / sumEnergy).coerceIn(0f, 1f)
+                    } else {
+                        0.5f
+                    }
                 }
             }
 
@@ -157,6 +185,10 @@ class RefocusEngine(private val context: Context) {
             depthBitmap.recycle()
 
             // Write companion metadata JSON
+            val nearDiopter = if (count == 3) planeDiopters.getOrNull(1) ?: 0f else planeDiopters.firstOrNull() ?: 0f
+            val midDiopter = if (count == 3) planeDiopters.getOrNull(0) ?: 0f else planeDiopters.getOrNull(count / 2) ?: 0f
+            val farDiopter = if (count == 3) planeDiopters.getOrNull(2) ?: 0f else planeDiopters.lastOrNull() ?: 0f
+
             val metaDest = File(bundleDir, "metadata.json")
             val metaJson = JSONObject().apply {
                 put("photoUri", photoUri.toString())
@@ -167,9 +199,9 @@ class RefocusEngine(private val context: Context) {
                 val dioptersJson = org.json.JSONArray()
                 planeDiopters.forEach { dioptersJson.put(it) }
                 put("diopters", dioptersJson)
-                put("nearDiopters", planeDiopters.firstOrNull() ?: 0f)
-                put("midDiopters", planeDiopters.getOrNull(count / 2) ?: 0f)
-                put("farDiopters", planeDiopters.lastOrNull() ?: 0f)
+                put("nearDiopters", nearDiopter)
+                put("midDiopters", midDiopter)
+                put("farDiopters", farDiopter)
                 put("depthWidth", proxyW)
                 put("depthHeight", proxyH)
             }
@@ -185,9 +217,9 @@ class RefocusEngine(private val context: Context) {
                 farPlanePath = farDest.absolutePath,
                 depthMapPath = depthDest.absolutePath,
                 planeCount = count,
-                nearDiopters = planeDiopters.firstOrNull() ?: 0f,
-                midDiopters = planeDiopters.getOrNull(count / 2) ?: 0f,
-                farDiopters = planeDiopters.lastOrNull() ?: 0f,
+                nearDiopters = nearDiopter,
+                midDiopters = midDiopter,
+                farDiopters = farDiopter,
                 width = fullWidth,
                 height = fullHeight
             )
