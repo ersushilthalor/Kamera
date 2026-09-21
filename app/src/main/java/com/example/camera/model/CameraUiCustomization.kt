@@ -138,9 +138,10 @@ enum class TopControlItem(val id: String, val label: String) {
 
 data class ModeLayoutConfig(
     val visibleModes: List<CameraMode> = listOf(
+        CameraMode.MASTER,
+        CameraMode.VIDEO,
         CameraMode.PHOTO,
         CameraMode.PORTRAIT,
-        CameraMode.VIDEO,
         CameraMode.MORE
     ),
     val modeSelectorPosition: ModeSelectorPosition = ModeSelectorPosition.BELOW_SHUTTER,
@@ -169,7 +170,7 @@ data class ModeLayoutConfig(
     val showZoomCapsule: Boolean = true,
     val zoomCapsuleScale: Float = 1.0f,
     val zoomCapsuleVerticalOffsetDp: Int = 0,
-    val accentColorHex: String = "#FFD54F",
+    val accentColorHex: String = "#FF7A00",
     // Extended text styling
     val textColorHex: String = "#FFFFFF",
     val fontWeightOption: FontWeightOption = FontWeightOption.SEMI_BOLD,

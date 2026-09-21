@@ -39,6 +39,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.camera.model.*
 import com.example.camera.ui.components.FrostedGlassBox
+import com.example.camera.ui.panels.*
 import com.example.camera.viewmodel.CameraViewModel
 
 @Composable
@@ -118,6 +119,7 @@ fun CameraScreen(
     val portraitConfig by viewModel.portraitConfig.collectAsStateWithLifecycle()
     val portraitProcessingState by viewModel.portraitProcessingState.collectAsStateWithLifecycle()
     val isPortraitSettingsOpen by viewModel.isPortraitSettingsOpen.collectAsStateWithLifecycle()
+    val activeFloatingPanel by viewModel.activeFloatingPanel.collectAsStateWithLifecycle()
     val saveSelfieAsPreviewed by viewModel.saveSelfieAsPreviewed.collectAsStateWithLifecycle()
     val photoMegapixelMode by viewModel.photoMegapixelMode.collectAsStateWithLifecycle()
     val isRefocusPhotoEnabled by viewModel.isRefocusPhotoEnabled.collectAsStateWithLifecycle()
@@ -242,10 +244,7 @@ fun CameraScreen(
         }
     }
 
-    val isAnyWindowOpen = isPhotoFilterBarOpen || isPortraitStyleBarOpen || isHollywoodGradeBarOpen ||
-            isCinemaSettingsOpen || isManualProOpen || isMoreModesOpen ||
-            (cameraMode == CameraMode.PORTRAIT && isPortraitSettingsOpen) ||
-            isVideoSettingsPanelOpen
+    val isAnyWindowOpen = activeFloatingPanel != CameraFloatingPanel.NONE || isCinemaSettingsOpen || isHollywoodGradeBarOpen
 
     Box(
         modifier = modifier
@@ -436,111 +435,181 @@ fun CameraScreen(
             onTimerClick = { viewModel.cycleTimerMode() },
             onGridClick = { viewModel.cycleGridType() },
             onRawClick = { viewModel.toggleRawCapture() },
-            onSettingsClick = { viewModel.setSettingsOpen(true) },
+            onSettingsClick = { viewModel.toggleFloatingPanel(CameraFloatingPanel.QUICK_SETTINGS) },
+            activeFloatingPanel = activeFloatingPanel,
+            onToggleFloatingPanel = { panel -> viewModel.toggleFloatingPanel(panel) },
             layoutConfig = activeLayoutConfig,
             modifier = Modifier.align(Alignment.TopCenter)
         )
 
-        // 2b. Floating Frosted Video Settings Panel (Resolution & Frame Rate)
-        if (cameraMode == CameraMode.VIDEO) {
-            FloatingVideoSettingsPanel(
-                isOpen = isVideoSettingsPanelOpen,
-                currentResolution = selectedVideoResolution,
-                currentFps = videoFps,
-                isUltraStabilizationEnabled = hybridStabilizationConfig.isUltraStabilizationEnabled,
-                onResolutionSelected = { res ->
-                    viewModel.selectVideoResolution(res)
-                },
-                onFpsSelected = { fps ->
-                    viewModel.setVideoFps(fps)
-                },
-                onUltraStabilizationToggle = {
-                    viewModel.toggleUltraStabilization()
-                },
-                onDismiss = { viewModel.setVideoSettingsPanelOpen(false) },
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .statusBarsPadding()
-                    .padding(top = 56.dp)
-            )
-        }
-
-        // 3. Manual Pro Control Bar (Slide-up above bottom controls in Photo/Video modes)
-        if (cameraMode != CameraMode.PORTRAIT) {
-            ManualProControlBar(
-                isOpen = isManualProOpen,
-                activeTab = activeProTab,
-                capabilities = capabilities,
-                exposureCompensation = exposureCompensation,
-                manualIso = manualIso,
-                manualShutterSpeedNs = manualShutterSpeedNs,
-                whiteBalance = whiteBalance,
-                focusMode = focusMode,
-                manualFocusDistance = manualFocusDistance,
-                colorProfile = colorProfile,
-                isAeLocked = isAeLocked,
-                isAfLocked = isAfLocked,
-                onTabSelected = { viewModel.setActiveProTab(it) },
-                onExposureChange = { viewModel.setExposureCompensation(it) },
-                onIsoChange = { viewModel.setManualIso(it) },
-                onShutterChange = { viewModel.setManualShutterSpeedNs(it) },
-                onWbChange = { viewModel.setWhiteBalance(it) },
-                onFocusModeChange = { viewModel.setFocusMode(it) },
-                onFocusDistanceChange = { viewModel.setManualFocusDistance(it) },
-                onColorProfileChange = { viewModel.setColorProfile(it) },
-                onToggleAeLock = { viewModel.toggleAeLock() },
-                onToggleAfLock = { viewModel.toggleAfLock() },
-                onClose = { viewModel.setManualProOpen(false) },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 215.dp)
-            )
-        }
-
-        // 3b. Dedicated Portrait Mode AI Controls Panel
-        AnimatedVisibility(
-            visible = cameraMode == CameraMode.PORTRAIT && isPortraitSettingsOpen,
-            enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
-            exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
+        // 3. Centralized Floating Panel Layer
+        // Only ONE floating panel exists at a time!
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 215.dp)
+                .padding(bottom = 210.dp)
+                .fillMaxWidth(),
+            contentAlignment = Alignment.BottomCenter
         ) {
-            PortraitControlBar(
-                config = portraitConfig,
-                processingState = portraitProcessingState,
-                onBlurStrengthChanged = { viewModel.setPortraitBlurStrength(it) },
-                onApertureSelected = { viewModel.setPortraitAperture(it) },
-                onBokehStyleSelected = { viewModel.setPortraitBokehStyle(it) },
-                onToggleFaceEnhancement = { viewModel.togglePortraitFaceEnhancement() },
-                onToggleSkinTone = { viewModel.togglePortraitSkinTone() },
-                onToggleOpticalBlurGuided = { viewModel.toggleOpticalBlurGuided() },
-                onClose = { viewModel.setPortraitSettingsOpen(false) },
-                modifier = Modifier.padding(horizontal = 12.dp)
-            )
+            when (activeFloatingPanel) {
+                CameraFloatingPanel.MASTER_CONTROLS -> {
+                    MasterControlsPanel(
+                        isOpen = true,
+                        capabilities = capabilities,
+                        exposureCompensation = exposureCompensation,
+                        manualIso = manualIso,
+                        manualShutterSpeedNs = manualShutterSpeedNs,
+                        whiteBalance = whiteBalance,
+                        focusMode = focusMode,
+                        manualFocusDistance = manualFocusDistance,
+                        isAeLocked = isAeLocked,
+                        isAfLocked = isAfLocked,
+                        isRawEnabled = isRawEnabled,
+                        onExposureChange = { viewModel.setExposureCompensation(it) },
+                        onIsoChange = { viewModel.setManualIso(it) },
+                        onShutterChange = { viewModel.setManualShutterSpeedNs(it) },
+                        onWbChange = { viewModel.setWhiteBalance(it) },
+                        onFocusModeChange = { viewModel.setFocusMode(it) },
+                        onFocusDistanceChange = { viewModel.setManualFocusDistance(it) },
+                        onToggleAeLock = { viewModel.toggleAeLock() },
+                        onToggleAfLock = { viewModel.toggleAfLock() },
+                        onToggleRaw = { viewModel.toggleRawCapture() },
+                        onClose = { viewModel.closeFloatingPanel() }
+                    )
+                }
+
+                CameraFloatingPanel.FILTER_TRAY -> {
+                    FilterTrayPanel(
+                        isOpen = true,
+                        selectedFilter = selectedPhotoFilter,
+                        onFilterSelected = { viewModel.setSelectedPhotoFilter(it) },
+                        onClose = { viewModel.closeFloatingPanel() }
+                    )
+                }
+
+                CameraFloatingPanel.PORTRAIT_APERTURE -> {
+                    PortraitAperturePanel(
+                        isOpen = true,
+                        portraitConfig = portraitConfig,
+                        onApertureSelected = { viewModel.setPortraitAperture(it) },
+                        onBlurStrengthChanged = { viewModel.setPortraitBlurStrength(it) },
+                        onBokehStyleSelected = { viewModel.setPortraitBokehStyle(it) },
+                        onToggleDepthPreview = { viewModel.toggleDepthPreview() },
+                        onToggleFaceEnhancement = { viewModel.togglePortraitFaceEnhancement() },
+                        onClose = { viewModel.closeFloatingPanel() }
+                    )
+                }
+
+                CameraFloatingPanel.VIDEO_SETTINGS -> {
+                    VideoSettingsPanel(
+                        isOpen = true,
+                        currentQuality = currentVideoQuality,
+                        isStabilizationEnabled = isVideoStabilizationEnabled,
+                        hybridConfig = hybridStabilizationConfig,
+                        isAudioEnabled = isAudioEnabled,
+                        onQualitySelected = { viewModel.setVideoQuality(it) },
+                        onToggleStabilization = { viewModel.setVideoStabilization(!isVideoStabilizationEnabled) },
+                        onToggleUltraStabilization = { viewModel.toggleUltraStabilization() },
+                        onToggleAudio = { viewModel.toggleAudio() },
+                        onClose = { viewModel.closeFloatingPanel() }
+                    )
+                }
+
+                CameraFloatingPanel.MORE_MODES -> {
+                    MoreModesPanel(
+                        isOpen = true,
+                        photoMegapixelMode = photoMegapixelMode,
+                        isRefocusPhotoEnabled = isRefocusPhotoEnabled,
+                        onSelectHiRes50M = {
+                            viewModel.togglePhotoMegapixelMode()
+                            viewModel.closeFloatingPanel()
+                        },
+                        onSelectNight = {
+                            viewModel.setCameraMode(CameraMode.NIGHT)
+                            viewModel.closeFloatingPanel()
+                        },
+                        onSelectCinemaLog = {
+                            viewModel.setCameraMode(CameraMode.CINEMA)
+                            viewModel.closeFloatingPanel()
+                        },
+                        onSelectMacro = {
+                            viewModel.setCameraMode(CameraMode.PHOTO)
+                            viewModel.setFocusMode(FocusMode.MACRO)
+                            viewModel.closeFloatingPanel()
+                            viewModel.showToast("Macro Mode Active")
+                        },
+                        onSelectDollyZoom = {
+                            viewModel.setCameraMode(CameraMode.DOLLY_ZOOM)
+                            viewModel.closeFloatingPanel()
+                        },
+                        onSelectAiSubjectTracking = {
+                            viewModel.setCameraMode(CameraMode.AI_SUBJECT_TRACKING)
+                            viewModel.closeFloatingPanel()
+                        },
+                        onToggleRefocus = {
+                            viewModel.setRefocusPhotoEnabled(!isRefocusPhotoEnabled)
+                            viewModel.closeFloatingPanel()
+                        },
+                        onOpenSettings = {
+                            viewModel.closeFloatingPanel()
+                            viewModel.setSettingsOpen(true)
+                        },
+                        onClose = {
+                            viewModel.closeFloatingPanel()
+                            if (cameraMode == CameraMode.MORE) {
+                                viewModel.setCameraMode(CameraMode.PHOTO)
+                            }
+                        }
+                    )
+                }
+
+                CameraFloatingPanel.QUICK_SETTINGS -> {
+                    QuickSettingsPanel(
+                        isOpen = true,
+                        flashMode = flashMode,
+                        timerMode = timerMode,
+                        aspectRatio = viewModel.selectedAspectRatio.value,
+                        gridType = gridType,
+                        isRawEnabled = isRawEnabled,
+                        isLevelerEnabled = horizonLeveler,
+                        onFlashSelected = { viewModel.setFlashMode(it) },
+                        onTimerSelected = { viewModel.setTimerMode(it) },
+                        onAspectRatioSelected = { viewModel.setAspectRatio(it) },
+                        onGridTypeSelected = { viewModel.setGridType(it) },
+                        onToggleRaw = { viewModel.toggleRawCapture() },
+                        onToggleLeveler = { viewModel.setHorizonLeveler(!horizonLeveler) },
+                        onClose = { viewModel.closeFloatingPanel() }
+                    )
+                }
+
+                CameraFloatingPanel.NONE -> {
+                    // No floating panel open
+                }
+            }
         }
 
-        // 3c. Floating 'f' button in Portrait Mode
+        // Floating 'f' button in Portrait Mode
         if (cameraMode == CameraMode.PORTRAIT) {
+            val isApertureOpen = activeFloatingPanel == CameraFloatingPanel.PORTRAIT_APERTURE
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = 16.dp, bottom = 220.dp)
                     .size(46.dp)
                     .clip(CircleShape)
-                    .background(if (isPortraitSettingsOpen) Color(0xFFFFD54F) else Color(0xD91E1E24))
+                    .background(if (isApertureOpen) Color(0xFFFF7A00) else Color(0xD91E1E24))
                     .border(
                         width = 1.5.dp,
-                        color = if (isPortraitSettingsOpen) Color(0xFFFFD54F) else Color.White.copy(alpha = 0.35f),
+                        color = if (isApertureOpen) Color(0xFFFF7A00) else Color.White.copy(alpha = 0.35f),
                         shape = CircleShape
                     )
-                    .clickable { viewModel.setPortraitSettingsOpen(!isPortraitSettingsOpen) }
+                    .clickable { viewModel.toggleFloatingPanel(CameraFloatingPanel.PORTRAIT_APERTURE) }
                     .testTag("portrait_f_button"),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "f",
-                    color = if (isPortraitSettingsOpen) Color.Black else Color(0xFFFFD54F),
+                    color = if (isApertureOpen) Color.Black else Color(0xFFFF7A00),
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
@@ -548,124 +617,6 @@ fun CameraScreen(
                 )
             }
         }
-
-        // 3d. Dedicated Cinema Mode Settings Window (matching reference image)
-        AnimatedVisibility(
-            visible = cameraMode == CameraMode.CINEMA && isCinemaSettingsOpen,
-            enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
-            exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 }),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 215.dp)
-        ) {
-            CinemaSettingsWindow(
-                config = cinemaConfig,
-                capabilities = cinemaCapabilities,
-                rec2020AutoToneParams = rec2020AutoToneParams,
-                onConfigChange = { updatedConfig ->
-                    viewModel.updateCinemaConfig(updatedConfig)
-                },
-                onDismissRequest = { viewModel.setCinemaSettingsOpen(false) },
-                modifier = Modifier.padding(horizontal = 14.dp)
-            )
-        }
-
-        // 3d2. Photo Mode Filter Selector Bar
-        AnimatedVisibility(
-            visible = cameraMode == CameraMode.PHOTO && isPhotoFilterBarOpen,
-            enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
-            exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 }),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 215.dp)
-        ) {
-            PhotoFilterSelectorBar(
-                selectedFilter = selectedPhotoFilter,
-                onFilterSelected = { viewModel.setSelectedPhotoFilter(it) },
-                onClose = { viewModel.setPhotoFilterBarOpen(false) }
-            )
-        }
-
-        // 3d3. Portrait Mode Style Selector Bar
-        AnimatedVisibility(
-            visible = cameraMode == CameraMode.PORTRAIT && isPortraitStyleBarOpen,
-            enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
-            exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 }),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 215.dp)
-        ) {
-            PortraitStyleSelectorBar(
-                selectedStyle = portraitConfig.selectedStyle,
-                onStyleSelected = { viewModel.setSelectedPortraitStyle(it) },
-                onClose = { viewModel.setPortraitStyleBarOpen(false) }
-            )
-        }
-
-        // 3d4. Hollywood Grade Selector Bar (Cinema Mode)
-        AnimatedVisibility(
-            visible = cameraMode == CameraMode.CINEMA && isHollywoodGradeBarOpen,
-            enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
-            exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 }),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 215.dp)
-        ) {
-            HollywoodGradeSelectorBar(
-                selectedGrade = cinemaConfig.selectedHollywoodGrade,
-                intensity = cinemaConfig.gradeIntensity,
-                onGradeSelected = { viewModel.setHollywoodGrade(it) },
-                onIntensityChange = { viewModel.setGradeIntensity(it) },
-                onClose = { viewModel.setHollywoodGradeBarOpen(false) }
-            )
-        }
-
-        // 3e. Dedicated More Modes Drawer
-        MoreModesDrawer(
-            isOpen = isMoreModesOpen,
-            onDismissRequest = {
-                viewModel.setMoreModesOpen(false)
-                if (cameraMode == CameraMode.MORE) {
-                    viewModel.setCameraMode(CameraMode.PHOTO)
-                }
-            },
-            onSelectProManual = {
-                viewModel.setMoreModesOpen(false)
-                viewModel.setCameraMode(CameraMode.PHOTO)
-                viewModel.setManualProOpen(true)
-            },
-            onSelectCinemaLog = {
-                viewModel.setMoreModesOpen(false)
-                viewModel.setCameraMode(CameraMode.CINEMA)
-            },
-            onSelectMacro = {
-                viewModel.setMoreModesOpen(false)
-                viewModel.setCameraMode(CameraMode.PHOTO)
-                viewModel.showToast("Macro Mode Active (Close Focus)")
-            },
-            onSelectNight = {
-                viewModel.setMoreModesOpen(false)
-                viewModel.setCameraMode(CameraMode.NIGHT)
-            },
-            onSelectDollyZoom = {
-                viewModel.setMoreModesOpen(false)
-                viewModel.setCameraMode(CameraMode.DOLLY_ZOOM)
-            },
-            onSelectAiSubjectTracking = {
-                viewModel.setMoreModesOpen(false)
-                viewModel.setCameraMode(CameraMode.AI_SUBJECT_TRACKING)
-            },
-            onOpenSettings = {
-                viewModel.setMoreModesOpen(false)
-                if (cameraMode == CameraMode.MORE) {
-                    viewModel.setCameraMode(CameraMode.PHOTO)
-                }
-                viewModel.setSettingsOpen(true)
-            },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 140.dp)
-        )
 
         // 4. Toast Notification Overlay
         AnimatedVisibility(

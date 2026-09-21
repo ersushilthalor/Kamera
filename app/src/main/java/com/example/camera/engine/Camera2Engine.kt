@@ -848,7 +848,7 @@ class Camera2Engine(private val context: Context) {
 
     fun getTargetAspectRatioForMode(mode: CameraMode = currentMode): Float {
         return when (mode) {
-            CameraMode.PHOTO, CameraMode.PORTRAIT -> 4f / 3f // Fixed 3:4 portrait (sensor landscape 4:3)
+            CameraMode.PHOTO, CameraMode.PORTRAIT, CameraMode.MASTER -> 4f / 3f // Fixed 3:4 portrait (sensor landscape 4:3)
             else -> 16f / 9f // Fixed 9:16 portrait (sensor landscape 16:9)
         }
     }
@@ -1021,7 +1021,7 @@ class Camera2Engine(private val context: Context) {
                                 cameraDevice = camera
                                 val texture = previewSurfaceTexture ?: return
                                 val optimalSize = _previewBufferSize.value ?: Size(1920, 1080)
-                                val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
+                                val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT || currentMode == CameraMode.MASTER)
                                 val targetW = if (viewfinderWidth > 0) viewfinderWidth else 1080
                                 val targetH = if (viewfinderHeight > 0) viewfinderHeight else if (isPhotoOrPortrait) 1440 else 1920
                                 val cameraW = max(optimalSize.width, optimalSize.height)
@@ -1072,7 +1072,7 @@ class Camera2Engine(private val context: Context) {
                 cameraDevice = warmDevice
                 val texture = previewSurfaceTexture ?: return@synchronized
                 val optimalSize = _previewBufferSize.value ?: Size(1920, 1080)
-                val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
+                val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT || currentMode == CameraMode.MASTER)
                 val targetW = if (viewfinderWidth > 0) viewfinderWidth else 1080
                 val targetH = if (viewfinderHeight > 0) viewfinderHeight else if (isPhotoOrPortrait) 1440 else 1920
                 val cameraW = max(optimalSize.width, optimalSize.height)
@@ -1139,8 +1139,8 @@ class Camera2Engine(private val context: Context) {
      */
     fun setMode(mode: CameraMode) {
         if (currentMode == mode) return
-        val wasPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
-        val isPhotoOrPortrait = (mode == CameraMode.PHOTO || mode == CameraMode.PORTRAIT)
+        val wasPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT || currentMode == CameraMode.MASTER)
+        val isPhotoOrPortrait = (mode == CameraMode.PHOTO || mode == CameraMode.PORTRAIT || mode == CameraMode.MASTER)
         val wasMore = (currentMode == CameraMode.MORE)
         if (_isRecordingVideo.value) {
             stopVideoRecording()
@@ -1229,7 +1229,7 @@ class Camera2Engine(private val context: Context) {
 
                     _previewAspectRatio.value = targetRatio
                     _previewBufferSize.value = optimalPreviewSize
-                    val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
+                    val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT || currentMode == CameraMode.MASTER)
                     val targetW = if (viewfinderWidth > 0) viewfinderWidth else 1080
                     val targetH = if (viewfinderHeight > 0) viewfinderHeight else if (isPhotoOrPortrait) 1440 else 1920
                     val cameraW = max(optimalPreviewSize.width, optimalPreviewSize.height)
@@ -1302,7 +1302,7 @@ class Camera2Engine(private val context: Context) {
             curSurf = Surface(texture)
             previewSurface = curSurf
         }
-        val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
+        val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT || currentMode == CameraMode.MASTER)
         val targetW = if (viewfinderWidth > 0) viewfinderWidth else 1080
         val targetH = if (viewfinderHeight > 0) viewfinderHeight else if (isPhotoOrPortrait) 1440 else 1920
         motorolaSwitchEngine.compositor.setMainViewfinderSurface(curSurf, targetW, targetH)
@@ -1320,7 +1320,7 @@ class Camera2Engine(private val context: Context) {
             viewfinderHeight = height
         }
         if (texture != null) {
-            val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
+            val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT || currentMode == CameraMode.MASTER)
             val optimalSize = _previewBufferSize.value ?: Size(1920, 1080)
             val cameraW = max(optimalSize.width, optimalSize.height)
             val cameraH = min(optimalSize.width, optimalSize.height)
@@ -1407,7 +1407,7 @@ class Camera2Engine(private val context: Context) {
             val sensorOrient = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
             _sensorOrientation.value = sensorOrient
             _previewBufferSize.value = optimalPreviewSize
-            val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
+            val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT || currentMode == CameraMode.MASTER)
             val targetW = if (viewfinderWidth > 0) viewfinderWidth else 1080
             val targetH = if (viewfinderHeight > 0) viewfinderHeight else if (isPhotoOrPortrait) 1440 else 1920
             val cameraW = max(optimalPreviewSize.width, optimalPreviewSize.height)
@@ -1533,7 +1533,7 @@ class Camera2Engine(private val context: Context) {
             kotlin.math.abs(ratio - (16f / 9f)) < 0.05f
         }
 
-        val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT)
+        val isPhotoOrPortrait = (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT || currentMode == CameraMode.MASTER)
 
         return when {
             isPhotoOrPortrait -> {
@@ -2820,12 +2820,12 @@ class Camera2Engine(private val context: Context) {
             return
         }
 
-        if (isRefocusPhotoEnabled && currentMode == CameraMode.PHOTO) {
+        if (isRefocusPhotoEnabled && (currentMode == CameraMode.PHOTO || currentMode == CameraMode.MASTER)) {
             takePhotoRefocus(onComplete)
             return
         }
 
-        if (isHighQualityZoomEnabled && currentZoom > 1.2f && currentMode == CameraMode.PHOTO) {
+        if (isHighQualityZoomEnabled && currentZoom > 1.2f && (currentMode == CameraMode.PHOTO || currentMode == CameraMode.MASTER)) {
             takePhotoHighQualityZoom(onComplete)
             return
         }
@@ -4646,7 +4646,7 @@ class Camera2Engine(private val context: Context) {
         }
 
         val photoFilter = selectedPhotoFilter
-        val outputBytes = if (photoFilter != PhotoFilter.ORIGINAL && currentMode == CameraMode.PHOTO) {
+        val outputBytes = if (photoFilter != PhotoFilter.ORIGINAL && (currentMode == CameraMode.PHOTO || currentMode == CameraMode.PORTRAIT || currentMode == CameraMode.MASTER)) {
             try {
                 val matrix = photoFilter.toAndroidColorMatrix()
                 val srcBmp = BitmapFactory.decodeByteArray(finalBytes, 0, finalBytes.size)

@@ -255,7 +255,7 @@ fun BottomControlBar(
                             )
 
                             when (cameraMode) {
-                                CameraMode.PHOTO, CameraMode.MORE, CameraMode.AI_SUBJECT_TRACKING -> {
+                                CameraMode.PHOTO, CameraMode.MASTER, CameraMode.MORE, CameraMode.AI_SUBJECT_TRACKING -> {
                                     val shutterColor = when (layoutConfig.shutterStyle) {
                                         ShutterStyle.MINIMAL_ACCENT -> accentColor
                                         ShutterStyle.LEICA_RED_DOT -> Color(0xFFE53935)
@@ -358,17 +358,16 @@ fun BottomControlBar(
                         val modeScrollState = rememberScrollState()
                         // User directive: only Photo, Portrait, and Video in the main bar; all other modes in More Modes
                         val modesToDisplay = remember(layoutConfig.visibleModes) {
-                            val filtered = layoutConfig.visibleModes.filter {
-                                it == CameraMode.PHOTO || it == CameraMode.PORTRAIT || it == CameraMode.VIDEO || it == CameraMode.MORE
-                            }
-                            if (filtered.isEmpty()) {
-                                listOf(CameraMode.PHOTO, CameraMode.PORTRAIT, CameraMode.VIDEO, CameraMode.MORE)
-                            } else {
-                                filtered
-                            }
+                            listOf(
+                                CameraMode.MASTER,
+                                CameraMode.VIDEO,
+                                CameraMode.PHOTO,
+                                CameraMode.PORTRAIT,
+                                CameraMode.MORE
+                            )
                         }
 
-                        val isMoreModeActive = (cameraMode != CameraMode.PHOTO && cameraMode != CameraMode.PORTRAIT && cameraMode != CameraMode.VIDEO)
+                        val isMoreModeActive = (cameraMode != CameraMode.MASTER && cameraMode != CameraMode.VIDEO && cameraMode != CameraMode.PHOTO && cameraMode != CameraMode.PORTRAIT)
 
                         LaunchedEffect(cameraMode) {
                             val targetMode = if (isMoreModeActive) CameraMode.MORE else cameraMode

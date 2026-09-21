@@ -111,6 +111,42 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val _isManualProOpen = MutableStateFlow(false)
     val isManualProOpen: StateFlow<Boolean> = _isManualProOpen.asStateFlow()
 
+    // Centralized Floating Panel Manager (Only ONE floating panel open at a time)
+    private val _activeFloatingPanel = MutableStateFlow<CameraFloatingPanel>(CameraFloatingPanel.NONE)
+    val activeFloatingPanel: StateFlow<CameraFloatingPanel> = _activeFloatingPanel.asStateFlow()
+
+    fun toggleFloatingPanel(panel: CameraFloatingPanel) {
+        if (_activeFloatingPanel.value == panel) {
+            _activeFloatingPanel.value = CameraFloatingPanel.NONE
+        } else {
+            _activeFloatingPanel.value = panel
+        }
+        // Keep legacy flags in sync
+        _isManualProOpen.value = (_activeFloatingPanel.value == CameraFloatingPanel.MASTER_CONTROLS)
+        _isMoreModesOpen.value = (_activeFloatingPanel.value == CameraFloatingPanel.MORE_MODES)
+        _isVideoSettingsPanelOpen.value = (_activeFloatingPanel.value == CameraFloatingPanel.VIDEO_SETTINGS)
+        _isPortraitSettingsOpen.value = (_activeFloatingPanel.value == CameraFloatingPanel.PORTRAIT_APERTURE)
+        _isPhotoFilterBarOpen.value = (_activeFloatingPanel.value == CameraFloatingPanel.FILTER_TRAY)
+    }
+
+    fun closeFloatingPanel() {
+        _activeFloatingPanel.value = CameraFloatingPanel.NONE
+        _isManualProOpen.value = false
+        _isMoreModesOpen.value = false
+        _isVideoSettingsPanelOpen.value = false
+        _isPortraitSettingsOpen.value = false
+        _isPhotoFilterBarOpen.value = false
+    }
+
+    fun openFloatingPanel(panel: CameraFloatingPanel) {
+        _activeFloatingPanel.value = panel
+        _isManualProOpen.value = (panel == CameraFloatingPanel.MASTER_CONTROLS)
+        _isMoreModesOpen.value = (panel == CameraFloatingPanel.MORE_MODES)
+        _isVideoSettingsPanelOpen.value = (panel == CameraFloatingPanel.VIDEO_SETTINGS)
+        _isPortraitSettingsOpen.value = (panel == CameraFloatingPanel.PORTRAIT_APERTURE)
+        _isPhotoFilterBarOpen.value = (panel == CameraFloatingPanel.FILTER_TRAY)
+    }
+
     private val _activeProTab = MutableStateFlow(ProControlTab.EXPOSURE)
     val activeProTab: StateFlow<ProControlTab> = _activeProTab.asStateFlow()
 
@@ -556,8 +592,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // Restore initial mode aspect ratio:
         // - Photo mode: fixed 3:4
         // - Portrait mode: fixed 3:4
+        // - Master mode: fixed 3:4
         // - All other modes (Video, Cinema, etc.): fixed 9:16
-        if (initialMode == CameraMode.PHOTO || initialMode == CameraMode.PORTRAIT) {
+        if (initialMode == CameraMode.PHOTO || initialMode == CameraMode.PORTRAIT || initialMode == CameraMode.MASTER) {
             _selectedAspectRatio.value = CameraAspectRatio.RATIO_4_3
             engine.setPreviewAspectRatio(4f / 3f)
         } else {
@@ -770,8 +807,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // Apply strictly required aspect ratios:
         // - Photo mode: fixed 3:4
         // - Portrait mode: fixed 3:4
+        // - Master mode: fixed 3:4
         // - All other modes (Video, Cinema, etc.): fixed 9:16
-        if (mode == CameraMode.PHOTO || mode == CameraMode.PORTRAIT) {
+        if (mode == CameraMode.PHOTO || mode == CameraMode.PORTRAIT || mode == CameraMode.MASTER) {
             _selectedAspectRatio.value = CameraAspectRatio.RATIO_4_3
             engine.setPreviewAspectRatio(4f / 3f)
         } else {
@@ -790,7 +828,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         _isCinemaSettingsOpen.value = false
         if (mode == CameraMode.MORE) {
-            _isMoreModesOpen.value = true
+            openFloatingPanel(CameraFloatingPanel.MORE_MODES)
+        } else if (mode == CameraMode.MASTER) {
+            openFloatingPanel(CameraFloatingPanel.MASTER_CONTROLS)
+        } else if (_activeFloatingPanel.value == CameraFloatingPanel.MORE_MODES ||
+            _activeFloatingPanel.value == CameraFloatingPanel.MASTER_CONTROLS) {
+            closeFloatingPanel()
         }
     }
 
@@ -1265,6 +1308,24 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         showToast("Skin Tone Correction: ${if (next) "ON" else "OFF"}")
     }
 
+    fun toggleDepthPreview() {
+        val next = !_portraitConfig.value.showDepthPreview
+        _portraitConfig.update { it.copy(showDepthPreview = next) }
+        showToast("Depth Preview: ${if (next) "ON" else "OFF"}")
+    }
+
+    fun setAspectRatio(ratio: CameraAspectRatio) {
+        _selectedAspectRatio.value = ratio
+        val floatRatio = when (ratio) {
+            CameraAspectRatio.RATIO_4_3 -> 4f / 3f
+            CameraAspectRatio.RATIO_16_9, CameraAspectRatio.RATIO_9_16 -> 16f / 9f
+            CameraAspectRatio.RATIO_1_1 -> 1f
+            CameraAspectRatio.RATIO_FULL -> 0f
+        }
+        engine.setPreviewAspectRatio(floatRatio)
+        showToast("Aspect Ratio: ${ratio.label}")
+    }
+
     fun toggleOpticalBlurGuided() {
         val next = !_portraitConfig.value.opticalBlurGuided
         _portraitConfig.update { it.copy(opticalBlurGuided = next) }
@@ -1309,7 +1370,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun onMainActionButtonClick() {
         when (_cameraMode.value) {
-            CameraMode.PHOTO, CameraMode.MORE, CameraMode.AI_SUBJECT_TRACKING -> triggerPhotoCapture()
+            CameraMode.PHOTO, CameraMode.MASTER, CameraMode.MORE, CameraMode.AI_SUBJECT_TRACKING -> triggerPhotoCapture()
             CameraMode.PORTRAIT -> triggerPortraitCapture()
             CameraMode.VIDEO, CameraMode.CINEMA, CameraMode.DOLLY_ZOOM -> triggerVideoCapture()
             CameraMode.NIGHT -> triggerNightCapture()

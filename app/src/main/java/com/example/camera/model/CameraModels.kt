@@ -5,13 +5,14 @@ import android.graphics.RectF
 import android.util.Size
 
 enum class CameraMode(val title: String) {
+    MASTER("Master"),
+    VIDEO("Video"),
     PHOTO("Photo"),
     PORTRAIT("Portrait"),
-    VIDEO("Video"),
+    MORE("More"),
     CINEMA("Cinema"),
     NIGHT("Night"),
     DOLLY_ZOOM("Dolly"),
-    MORE("More"),
     AI_SUBJECT_TRACKING("AI Tracking")
 }
 

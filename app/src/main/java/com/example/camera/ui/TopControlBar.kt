@@ -139,10 +139,12 @@ fun TopControlBar(
     onGridClick: () -> Unit,
     onRawClick: () -> Unit,
     onSettingsClick: () -> Unit,
+    activeFloatingPanel: CameraFloatingPanel = CameraFloatingPanel.NONE,
+    onToggleFloatingPanel: (CameraFloatingPanel) -> Unit = {},
     layoutConfig: ModeLayoutConfig = ModeLayoutConfig(),
     modifier: Modifier = Modifier
 ) {
-    val accentColor = layoutConfig.getComposeAccentColor()
+    val accentColor = Color(0xFFFF7A00)
     val iconSize = layoutConfig.topControlsIconSizeDp.dp
     val buttonSize = (layoutConfig.topControlsIconSizeDp + 14).dp.coerceAtLeast(32.dp)
 
@@ -241,6 +243,34 @@ fun TopControlBar(
 
         val primaryBadge = @Composable {
             when (cameraMode) {
+                CameraMode.MASTER -> {
+                    val isMasterOpen = activeFloatingPanel == CameraFloatingPanel.MASTER_CONTROLS
+                    Box(
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(17.dp))
+                            .background(if (isMasterOpen) accentColor.copy(alpha = 0.25f) else Color(0xB21A1A1E))
+                            .border(
+                                1.dp,
+                                if (isMasterOpen) accentColor else Color.White.copy(alpha = 0.22f),
+                                RoundedCornerShape(17.dp)
+                            )
+                            .clickable { onToggleFloatingPanel(CameraFloatingPanel.MASTER_CONTROLS) }
+                            .padding(horizontal = 12.dp)
+                            .testTag("top_master_controls_pill"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "MASTER PRO",
+                            color = if (isMasterOpen) accentColor else Color.White,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
                 CameraMode.PHOTO -> {
                     val is50M = photoMegapixelMode == PhotoMegapixelMode.M50
                     Box(
@@ -269,13 +299,18 @@ fun TopControlBar(
                     }
                 }
                 CameraMode.PORTRAIT -> {
+                    val isPortraitOpen = activeFloatingPanel == CameraFloatingPanel.PORTRAIT_APERTURE
                     Box(
                         modifier = Modifier
                             .height(34.dp)
                             .clip(RoundedCornerShape(17.dp))
-                            .background(Color(0xB21A1A1E))
-                            .border(1.dp, accentColor, RoundedCornerShape(17.dp))
-                            .clickable { onPortraitApertureClick() }
+                            .background(if (isPortraitOpen) accentColor.copy(alpha = 0.25f) else Color(0xB21A1A1E))
+                            .border(
+                                1.dp,
+                                if (isPortraitOpen) accentColor else Color.White.copy(alpha = 0.22f),
+                                RoundedCornerShape(17.dp)
+                            )
+                            .clickable { onToggleFloatingPanel(CameraFloatingPanel.PORTRAIT_APERTURE) }
                             .padding(horizontal = 12.dp)
                             .testTag("portrait_aperture_pill"),
                         contentAlignment = Alignment.Center
@@ -286,7 +321,7 @@ fun TopControlBar(
                         ) {
                             Text(
                                 text = "f",
-                                color = accentColor,
+                                color = if (isPortraitOpen) accentColor else Color.White,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
@@ -294,7 +329,7 @@ fun TopControlBar(
                             )
                             Text(
                                 text = portraitAperture,
-                                color = accentColor,
+                                color = if (isPortraitOpen) accentColor else Color.White,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 0.5.sp,
@@ -305,6 +340,7 @@ fun TopControlBar(
                     }
                 }
                 CameraMode.VIDEO -> {
+                    val isVideoSettingsOpen = activeFloatingPanel == CameraFloatingPanel.VIDEO_SETTINGS
                     val resLabel = when {
                         videoResolution?.width == 3840 || videoResolution?.height == 3840 -> "4K"
                         videoResolution?.width == 7680 || videoResolution?.height == 7680 -> "8K"
@@ -316,16 +352,21 @@ fun TopControlBar(
                         modifier = Modifier
                             .height(34.dp)
                             .clip(RoundedCornerShape(17.dp))
-                            .background(Color(0xB21A1A1E))
-                            .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(17.dp))
-                            .clickable { onVideoSettingsClick() }
-                            .padding(horizontal = 12.dp),
+                            .background(if (isVideoSettingsOpen) accentColor.copy(alpha = 0.25f) else Color(0xB21A1A1E))
+                            .border(
+                                1.dp,
+                                if (isVideoSettingsOpen) accentColor else Color.White.copy(alpha = 0.22f),
+                                RoundedCornerShape(17.dp)
+                            )
+                            .clickable { onToggleFloatingPanel(CameraFloatingPanel.VIDEO_SETTINGS) }
+                            .padding(horizontal = 12.dp)
+                            .testTag("top_video_quality_pill"),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = resLabel,
-                            color = Color.White,
-                            fontSize = 12.sp,
+                            text = "$resLabel · ${videoFps}P",
+                            color = if (isVideoSettingsOpen) accentColor else Color.White,
+                            fontSize = 11.5.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.5.sp,
                             maxLines = 1,
@@ -435,7 +476,7 @@ fun TopControlBar(
 
         val secondaryBadge = @Composable {
             when (cameraMode) {
-                CameraMode.PHOTO -> {
+                CameraMode.PHOTO, CameraMode.MASTER -> {
                     Box(
                         modifier = Modifier
                             .height(34.dp)
@@ -644,35 +685,37 @@ fun TopControlBar(
         }
 
         val settingsButton = @Composable {
+            val isQuickSettingsOpen = activeFloatingPanel == CameraFloatingPanel.QUICK_SETTINGS
             IconButton(
-                onClick = onSettingsClick,
+                onClick = { onToggleFloatingPanel(CameraFloatingPanel.QUICK_SETTINGS) },
                 modifier = Modifier
                     .size(buttonSize)
-                    .topControlStyle(layoutConfig)
+                    .topControlStyle(layoutConfig, activeColor = if (isQuickSettingsOpen) accentColor else null)
                     .testTag("settings_button")
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Settings,
                     contentDescription = "Settings",
-                    tint = Color.White.copy(alpha = 0.9f),
+                    tint = if (isQuickSettingsOpen) accentColor else Color.White.copy(alpha = 0.9f),
                     modifier = Modifier.size(iconSize)
                 )
             }
         }
 
         val filterButton = @Composable {
-            val isFilterActive = activePhotoFilter != PhotoFilter.ORIGINAL
+            val isFilterOpen = activeFloatingPanel == CameraFloatingPanel.FILTER_TRAY
+            val isFilterActive = activePhotoFilter != PhotoFilter.ORIGINAL || isFilterOpen
             IconButton(
-                onClick = onPhotoFilterClick,
+                onClick = { onToggleFloatingPanel(CameraFloatingPanel.FILTER_TRAY) },
                 modifier = Modifier
                     .size(buttonSize)
-                    .topControlStyle(layoutConfig, activeColor = if (isFilterActive) Color(0xFF64FFDA) else null)
+                    .topControlStyle(layoutConfig, activeColor = if (isFilterActive) accentColor else null)
                     .testTag("photo_filter_button")
             ) {
                 Icon(
                     imageVector = Icons.Default.AutoAwesome,
                     contentDescription = "Photo Filters",
-                    tint = if (isFilterActive) Color(0xFF64FFDA) else Color.White.copy(alpha = 0.9f),
+                    tint = if (isFilterActive) accentColor else Color.White.copy(alpha = 0.9f),
                     modifier = Modifier.size(iconSize)
                 )
             }
