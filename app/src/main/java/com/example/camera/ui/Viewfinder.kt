@@ -207,6 +207,15 @@ fun Viewfinder(
                                 colorMatrix.postConcat(cinemaMatrix)
                                 hasFilter = true
                             }
+                        } else if (cameraMode == CameraMode.VIDEO && cinemaConfig != null && cinemaConfig.selectedHollywoodGrade != com.example.camera.model.HollywoodColorGrade.OFF) {
+                            val gradeMatrix = com.example.camera.engine.CinemaColorPipeline.computeHollywoodColorMatrix(
+                                grade = cinemaConfig.selectedHollywoodGrade,
+                                intensity = cinemaConfig.gradeIntensity
+                            )
+                            if (gradeMatrix != null) {
+                                colorMatrix.postConcat(gradeMatrix)
+                                hasFilter = true
+                            }
                         } else if (cameraMode == CameraMode.PHOTO && activePhotoFilter != null && activePhotoFilter != PhotoFilter.ORIGINAL) {
                             val filterMat = activePhotoFilter.toAndroidColorMatrix()
                             if (filterMat != null) {
@@ -228,7 +237,62 @@ fun Viewfinder(
 
                 // Clean Cinematic LUT Active Badge
                 val badgeLut = activeLut ?: cinemaConfig?.selectedLut
-                if (cameraMode == CameraMode.CINEMA && badgeLut != null && badgeLut != CinematicLut.NONE) {
+                val hollywoodGrade = cinemaConfig?.selectedHollywoodGrade
+                if ((cameraMode == CameraMode.CINEMA || cameraMode == CameraMode.VIDEO) && hollywoodGrade != null && hollywoodGrade != com.example.camera.model.HollywoodColorGrade.OFF) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(10.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xCC0D0F18))
+                            .border(1.dp, hollywoodGrade.accentColor.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 9.dp, vertical = 5.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(hollywoodGrade.accentColor)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "GRADE: ${hollywoodGrade.displayName.uppercase()} • ${(cinemaConfig.gradeIntensity * 100).toInt()}%",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.6.sp
+                            )
+                        }
+                    }
+                } else if (cameraMode == CameraMode.CINEMA && cinemaConfig?.colorProfile == com.example.camera.model.CinemaColorProfile.SAMSUNG_APV_LOG) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(10.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xCC0D0F18))
+                            .border(1.dp, Color(0xFFFFD54F).copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 9.dp, vertical = 5.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFFFD54F))
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "APV LOG (SAMSUNG)",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.6.sp
+                            )
+                        }
+                    }
+                } else if (cameraMode == CameraMode.CINEMA && badgeLut != null && badgeLut != CinematicLut.NONE) {
                     val displayLabel = if (badgeLut == CinematicLut.CUSTOM) {
                         cinemaConfig?.customLutName ?: badgeLut.label
                     } else {

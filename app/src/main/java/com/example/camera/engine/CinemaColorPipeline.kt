@@ -72,6 +72,42 @@ object CinemaColorPipeline {
                 colorMatrix.postConcat(appleLogPedestal)
                 hasTransform = true
             }
+            CinemaColorProfile.SAMSUNG_APV_LOG -> {
+                // Samsung APV Log: Advanced Professional Video Log
+                // Wide dynamic range (14+ stops), lifted black pedestal (+35f), smooth highlight retention
+                if (config.selectedHollywoodGrade != com.example.camera.model.HollywoodColorGrade.OFF && config.gradeIntensity > 0f) {
+                    // Full Pipeline: Camera Capture -> Samsung APV Log -> Working Space -> Hollywood Grade -> Grade Intensity -> Output Transform
+                    val apvLogPedestal = ColorMatrix(floatArrayOf(
+                        0.76f, 0f, 0f, 0f, 35f,
+                        0f, 0.76f, 0f, 0f, 35f,
+                        0f, 0f, 0.76f, 0f, 35f,
+                        0f, 0f, 0f, 1f, 0f
+                    ))
+                    val workingSpaceTransform = ColorMatrix(floatArrayOf(
+                        1.316f, 0f, 0f, 0f, -46.05f,
+                        0f, 1.316f, 0f, 0f, -46.05f,
+                        0f, 0f, 1.316f, 0f, -46.05f,
+                        0f, 0f, 0f, 1f, 0f
+                    ))
+                    val gradeMat = config.selectedHollywoodGrade.getBlendedColorMatrix(config.gradeIntensity)
+                    colorMatrix.postConcat(apvLogPedestal)
+                    colorMatrix.postConcat(workingSpaceTransform)
+                    colorMatrix.postConcat(gradeMat)
+                } else {
+                    // Pure un-graded Samsung APV Log transfer curve
+                    val apvBase = ColorMatrix(floatArrayOf(
+                        0.76f, 0f, 0f, 0f, 35f,
+                        0f, 0.76f, 0f, 0f, 35f,
+                        0f, 0f, 0.76f, 0f, 35f,
+                        0f, 0f, 0f, 1f, 0f
+                    ))
+                    val apvSat = ColorMatrix()
+                    apvSat.setSaturation(0.86f)
+                    apvBase.postConcat(apvSat)
+                    colorMatrix.postConcat(apvBase)
+                }
+                hasTransform = true
+            }
             CinemaColorProfile.NATIVE -> {
                 // Native unadjusted profile
             }
@@ -131,7 +167,17 @@ object CinemaColorPipeline {
             hasTransform = true
         }
 
-        // 3. Cinematic LUT Transform (Hollywood Presets or Custom .cube)
+        // 3. Hollywood Colour Grade Transform (for profiles other than APV Log which is handled in step 1)
+        if (config.colorProfile != CinemaColorProfile.SAMSUNG_APV_LOG &&
+            config.selectedHollywoodGrade != com.example.camera.model.HollywoodColorGrade.OFF &&
+            config.gradeIntensity > 0f
+        ) {
+            val gradeMat = config.selectedHollywoodGrade.getBlendedColorMatrix(config.gradeIntensity)
+            colorMatrix.postConcat(gradeMat)
+            hasTransform = true
+        }
+
+        // 4. Cinematic LUT Transform (Hollywood Presets or Custom .cube)
         val lut = config.selectedLut
         if (lut != CinematicLut.NONE) {
             val lutMat = if (lut == CinematicLut.CUSTOM && !config.customLutPath.isNullOrBlank()) {
@@ -146,5 +192,16 @@ object CinemaColorPipeline {
         }
 
         return if (hasTransform) colorMatrix else null
+    }
+
+    /**
+     * Computes the standalone Hollywood Colour Grading matrix for live preview & video export.
+     */
+    fun computeHollywoodColorMatrix(
+        grade: com.example.camera.model.HollywoodColorGrade,
+        intensity: Float
+    ): ColorMatrix? {
+        if (grade == com.example.camera.model.HollywoodColorGrade.OFF || intensity <= 0f) return null
+        return grade.getBlendedColorMatrix(intensity)
     }
 }

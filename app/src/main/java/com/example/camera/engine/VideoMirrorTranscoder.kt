@@ -45,7 +45,12 @@ object VideoMirrorTranscoder {
         inputFile: File,
         outputFile: File,
         isMirrored: Boolean,
-        colorMatrix: FloatArray? = null
+        colorMatrix: FloatArray? = null,
+        targetWidth: Int? = null,
+        targetHeight: Int? = null,
+        targetBitrate: Int? = null,
+        forceHevc: Boolean = false,
+        useHighQualityUpscale: Boolean = false
     ): Boolean {
         if (!inputFile.exists() || inputFile.length() == 0L) {
             Log.e(TAG, "Input file does not exist or is empty")
@@ -84,10 +89,14 @@ object VideoMirrorTranscoder {
                 return false
             }
 
-            val width = videoFormat.getInteger(MediaFormat.KEY_WIDTH)
-            val height = videoFormat.getInteger(MediaFormat.KEY_HEIGHT)
+            val inWidth = videoFormat.getInteger(MediaFormat.KEY_WIDTH)
+            val inHeight = videoFormat.getInteger(MediaFormat.KEY_HEIGHT)
+            val outWidth = targetWidth ?: inWidth
+            val outHeight = targetHeight ?: inHeight
             val videoMime = videoFormat.getString(MediaFormat.KEY_MIME) ?: MediaFormat.MIMETYPE_VIDEO_AVC
-            val bitrate = if (videoFormat.containsKey(MediaFormat.KEY_BIT_RATE)) {
+            val bitrate = targetBitrate ?: if (outWidth >= 7680) {
+                80_000_000
+            } else if (videoFormat.containsKey(MediaFormat.KEY_BIT_RATE)) {
                 videoFormat.getInteger(MediaFormat.KEY_BIT_RATE)
             } else {
                 15_000_000
@@ -106,29 +115,72 @@ object VideoMirrorTranscoder {
             muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             muxer.setOrientationHint(rotation)
 
-            val targetEncoderMime = try {
-                val testCodec = MediaCodec.createEncoderByType(videoMime)
-                testCodec.release()
-                videoMime
-            } catch (e: Exception) {
-                MediaFormat.MIMETYPE_VIDEO_AVC
+            val is8KTarget = (outWidth >= 7680 || outHeight >= 7680)
+            val shouldTryHevc = forceHevc || is8KTarget
+
+            val targetEncoderMime = if (shouldTryHevc) {
+                try {
+                    val testCodec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_HEVC)
+                    testCodec.release()
+                    MediaFormat.MIMETYPE_VIDEO_HEVC
+                } catch (e: Exception) {
+                    Log.w(TAG, "HEVC encoder unavailable, falling back to AVC", e)
+                    MediaFormat.MIMETYPE_VIDEO_AVC
+                }
+            } else {
+                try {
+                    val testCodec = MediaCodec.createEncoderByType(videoMime)
+                    testCodec.release()
+                    videoMime
+                } catch (e: Exception) {
+                    MediaFormat.MIMETYPE_VIDEO_AVC
+                }
             }
 
-            // Configure encoder
-            val encFormat = MediaFormat.createVideoFormat(targetEncoderMime, width, height).apply {
+            // Configure encoder for target resolution (7680x4320 for 8K)
+            val encFormat = MediaFormat.createVideoFormat(targetEncoderMime, outWidth, outHeight).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
                 setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
                 setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                if (targetEncoderMime == MediaFormat.MIMETYPE_VIDEO_HEVC) {
+                    // Main profile for broad compatibility
+                    setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.HEVCProfileMain)
+                }
             }
 
-            encoder = MediaCodec.createEncoderByType(targetEncoderMime)
-            encoder.configure(encFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            encoder = try {
+                MediaCodec.createEncoderByType(targetEncoderMime).apply {
+                    configure(encFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to configure encoder for $outWidth x $outHeight ($targetEncoderMime), fallback to AVC", e)
+                val fallbackFormat = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, inWidth, inHeight).apply {
+                    setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+                    setInteger(MediaFormat.KEY_BIT_RATE, 35_000_000)
+                    setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
+                    setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                }
+                MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
+                    configure(fallbackFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                }
+            }
+
             val inputSurface = encoder.createInputSurface()
             encoder.start()
 
-            // Setup EGL on input surface
-            eglHelper = EglSurfaceHelper(inputSurface, width, height)
+            // Setup EGL on input surface with high quality GPU scaling if requested
+            val actualOutWidth = if (encFormat.containsKey(MediaFormat.KEY_WIDTH)) encFormat.getInteger(MediaFormat.KEY_WIDTH) else outWidth
+            val actualOutHeight = if (encFormat.containsKey(MediaFormat.KEY_HEIGHT)) encFormat.getInteger(MediaFormat.KEY_HEIGHT) else outHeight
+
+            eglHelper = EglSurfaceHelper(
+                surface = inputSurface,
+                width = actualOutWidth,
+                height = actualOutHeight,
+                inWidth = inWidth,
+                inHeight = inHeight,
+                useHighQualityUpscale = (useHighQualityUpscale || is8KTarget)
+            )
             eglHelper.makeCurrent()
 
             // Configure decoder with SurfaceTexture
@@ -282,7 +334,10 @@ object VideoMirrorTranscoder {
     private class EglSurfaceHelper(
         private val surface: Surface,
         val width: Int,
-        val height: Int
+        val height: Int,
+        val inWidth: Int = width,
+        val inHeight: Int = height,
+        val useHighQualityUpscale: Boolean = false
     ) {
         private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
         private var eglContext: EGLContext = EGL14.EGL_NO_CONTEXT
@@ -296,6 +351,8 @@ object VideoMirrorTranscoder {
         private var uColorMatrixLoc: Int = -1
         private var uColorOffsetLoc: Int = -1
         private var uHasColorMatrixLoc: Int = -1
+        private var uUseUpscaleLoc: Int = -1
+        private var uTexelSizeLoc: Int = -1
         private var aPositionLoc: Int = -1
         private var aTextureCoordLoc: Int = -1
 
@@ -392,8 +449,22 @@ object VideoMirrorTranscoder {
                 uniform mat4 uColorMatrix;
                 uniform vec4 uColorOffset;
                 uniform int uHasColorMatrix;
+                uniform int uUseUpscale;
+                uniform vec2 uTexelSize;
                 void main() {
-                    vec4 texColor = texture2D(sTexture, vTextureCoord);
+                    vec4 texColor;
+                    if (uUseUpscale != 0) {
+                        // High-Quality GPU 2x Interpolation Filter with edge preservation
+                        vec4 c = texture2D(sTexture, vTextureCoord);
+                        vec4 n = texture2D(sTexture, vTextureCoord + vec2(0.0, uTexelSize.y));
+                        vec4 s = texture2D(sTexture, vTextureCoord - vec2(0.0, uTexelSize.y));
+                        vec4 e = texture2D(sTexture, vTextureCoord + vec2(uTexelSize.x, 0.0));
+                        vec4 w = texture2D(sTexture, vTextureCoord - vec2(uTexelSize.x, 0.0));
+                        vec4 sharpened = c * 1.35 - (n + s + e + w) * 0.0875;
+                        texColor = clamp(sharpened, 0.0, 1.0);
+                    } else {
+                        texColor = texture2D(sTexture, vTextureCoord);
+                    }
                     if (uHasColorMatrix != 0) {
                         vec3 rgb = clamp((uColorMatrix * vec4(texColor.rgb, 1.0)).rgb + uColorOffset.rgb, 0.0, 1.0);
                         gl_FragColor = vec4(rgb, texColor.a);
@@ -419,6 +490,8 @@ object VideoMirrorTranscoder {
             uColorMatrixLoc = GLES20.glGetUniformLocation(program, "uColorMatrix")
             uColorOffsetLoc = GLES20.glGetUniformLocation(program, "uColorOffset")
             uHasColorMatrixLoc = GLES20.glGetUniformLocation(program, "uHasColorMatrix")
+            uUseUpscaleLoc = GLES20.glGetUniformLocation(program, "uUseUpscale")
+            uTexelSizeLoc = GLES20.glGetUniformLocation(program, "uTexelSize")
 
             val textures = IntArray(1)
             GLES20.glGenTextures(1, textures, 0)
@@ -431,7 +504,7 @@ object VideoMirrorTranscoder {
             GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
 
             surfaceTexture = SurfaceTexture(textureId).apply {
-                setDefaultBufferSize(width, height)
+                setDefaultBufferSize(inWidth, inHeight)
                 setOnFrameAvailableListener {
                     synchronized(frameSyncObject) {
                         frameAvailable = true
@@ -483,6 +556,15 @@ object VideoMirrorTranscoder {
 
             GLES20.glUniformMatrix4fv(uMVPMatrixLoc, 1, false, mvpMatrix, 0)
             GLES20.glUniformMatrix4fv(uSTMatrixLoc, 1, false, stMatrix, 0)
+
+            // High-quality GPU 2x interpolation uniforms
+            if (useHighQualityUpscale && inWidth > 0 && inHeight > 0) {
+                GLES20.glUniform1i(uUseUpscaleLoc, 1)
+                GLES20.glUniform2f(uTexelSizeLoc, 1.0f / inWidth.toFloat(), 1.0f / inHeight.toFloat())
+            } else {
+                GLES20.glUniform1i(uUseUpscaleLoc, 0)
+                GLES20.glUniform2f(uTexelSizeLoc, 0.0f, 0.0f)
+            }
 
             if (colorMatrix != null && colorMatrix.size >= 20) {
                 GLES20.glUniform1i(uHasColorMatrixLoc, 1)

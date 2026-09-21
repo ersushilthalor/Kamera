@@ -126,6 +126,7 @@ class Camera2Engine(private val context: Context) {
 
     private val _isRecordingVideo = MutableStateFlow(false)
     val isRecordingVideo: StateFlow<Boolean> = _isRecordingVideo.asStateFlow()
+    @Volatile private var isCurrentRecording8K = false
 
     private val _videoDurationSeconds = MutableStateFlow(0)
     val videoDurationSeconds: StateFlow<Int> = _videoDurationSeconds.asStateFlow()
@@ -3850,22 +3851,39 @@ class Camera2Engine(private val context: Context) {
                 _selectedVideoResolution.value ?: CameraResolution(1920, 1080)
             }
 
+            val is8kRequested = (requestedRes.width >= 7680 || requestedRes.height >= 4320)
+            isCurrentRecording8K = is8kRequested
+
             val supportedVideoSizes = map?.getOutputSizes(MediaRecorder::class.java)
                 ?: map?.getOutputSizes(SurfaceTexture::class.java)
                 ?: emptyArray()
 
-            val isSupported = supportedVideoSizes.any { it.width == requestedRes.width && it.height == requestedRes.height }
-            val videoRes = if (isSupported) {
-                requestedRes
-            } else {
-                val largest = supportedVideoSizes
-                    .filter { maxOf(it.width, it.height) <= 3840 }
+            val videoRes = if (is8kRequested) {
+                // For 8K: use stable internal 4K capture (3840x2160 or sensor's best 4K 16:9),
+                // and upscale 2x via GPU shaders to full 7680x4320 HEVC output upon final export.
+                val best4k = supportedVideoSizes
+                    .filter { it.width <= 3840 && it.height <= 2160 }
+                    .filter { Math.abs((it.width.toFloat() / it.height.toFloat()) - (16f / 9f)) < 0.05f }
                     .maxByOrNull { it.width * it.height }
-                if (largest != null) {
-                    Log.w(TAG, "[RECORDING] Size ${requestedRes.width}x${requestedRes.height} unsupported for ${lens.lensType}, using ${largest.width}x${largest.height}")
-                    CameraResolution(largest.width, largest.height)
+                if (best4k != null) {
+                    CameraResolution(best4k.width, best4k.height)
                 } else {
-                    CameraResolution(1920, 1080)
+                    CameraResolution(3840, 2160)
+                }
+            } else {
+                val isSupported = supportedVideoSizes.any { it.width == requestedRes.width && it.height == requestedRes.height }
+                if (isSupported) {
+                    requestedRes
+                } else {
+                    val largest = supportedVideoSizes
+                        .filter { maxOf(it.width, it.height) <= 3840 }
+                        .maxByOrNull { it.width * it.height }
+                    if (largest != null) {
+                        Log.w(TAG, "[RECORDING] Size ${requestedRes.width}x${requestedRes.height} unsupported for ${lens.lensType}, using ${largest.width}x${largest.height}")
+                        CameraResolution(largest.width, largest.height)
+                    } else {
+                        CameraResolution(1920, 1080)
+                    }
                 }
             }
 
@@ -4272,11 +4290,18 @@ class Camera2Engine(private val context: Context) {
                 config = cinemaEngine.config,
                 rec2020Params = rec2020AutoToneParams.value
             )
-        } else null
+        } else {
+            CinemaColorPipeline.computeHollywoodColorMatrix(
+                preferences.cinemaSelectedHollywoodGrade,
+                preferences.cinemaGradeIntensity
+            )
+        }
 
+        val is8kSession = isCurrentRecording8K
         val needsColorGrade = cinemaColorMatrix != null
         val needsMirror = isFrontFacing
-        val needsExportPipeline = needsColorGrade || needsMirror
+        val needs8kUpscale = is8kSession
+        val needsExportPipeline = needsColorGrade || needsMirror || needs8kUpscale
 
         var exportedFile: File? = null
         val fileToSave: File = if (needsExportPipeline) {
@@ -4286,7 +4311,12 @@ class Camera2Engine(private val context: Context) {
                     inputFile = tempFile,
                     outputFile = targetExport,
                     isMirrored = needsMirror,
-                    colorMatrix = cinemaColorMatrix?.array
+                    colorMatrix = cinemaColorMatrix?.array,
+                    targetWidth = if (needs8kUpscale) 7680 else null,
+                    targetHeight = if (needs8kUpscale) 4320 else null,
+                    targetBitrate = if (needs8kUpscale) 80_000_000 else null,
+                    forceHevc = needs8kUpscale,
+                    useHighQualityUpscale = needs8kUpscale
                 )
             } catch (e: Exception) {
                 Log.w(TAG, "Video export transcoding failed", e)

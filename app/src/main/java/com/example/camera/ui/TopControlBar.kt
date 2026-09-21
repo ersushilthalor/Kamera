@@ -124,6 +124,7 @@ fun TopControlBar(
     portraitAperture: String = "f/1.8",
     onPortraitApertureClick: () -> Unit = {},
     onPortraitStyleClick: () -> Unit = {},
+    onHollywoodGradeClick: () -> Unit = {},
     onPhotoFilterClick: () -> Unit = {},
     activePhotoFilter: PhotoFilter = PhotoFilter.ORIGINAL,
     selectedPortraitStyle: PortraitStyle = PortraitStyle.NATURAL,
@@ -334,6 +335,7 @@ fun TopControlBar(
                 }
                 CameraMode.CINEMA -> {
                     val resLabel = when {
+                        cinemaConfig.selectedResolution?.width == 7680 || cinemaConfig.selectedResolution?.height == 7680 -> "8K"
                         cinemaConfig.selectedResolution?.width == 3840 || cinemaConfig.selectedResolution?.height == 3840 -> "4K"
                         cinemaConfig.selectedResolution?.width == 1920 || cinemaConfig.selectedResolution?.height == 1920 -> "1080"
                         else -> "4K"
@@ -711,6 +713,25 @@ fun TopControlBar(
             }
         }
 
+        val hollywoodGradeButton = @Composable {
+            val isGradeActive = cinemaConfig.selectedHollywoodGrade != HollywoodColorGrade.OFF
+            val gradeAccent = if (isGradeActive) cinemaConfig.selectedHollywoodGrade.accentColor else Color(0xFFFFD54F)
+            IconButton(
+                onClick = onHollywoodGradeClick,
+                modifier = Modifier
+                    .size(buttonSize)
+                    .topControlStyle(layoutConfig, activeColor = if (isGradeActive) gradeAccent else null)
+                    .testTag("hollywood_grade_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = "Hollywood Color Grade",
+                    tint = if (isGradeActive) gradeAccent else Color.White.copy(alpha = 0.9f),
+                    modifier = Modifier.size(iconSize)
+                )
+            }
+        }
+
         val cinemaSettingsQuickButton = @Composable {
             IconButton(
                 onClick = onCinemaSettingsClick,
@@ -757,6 +778,7 @@ fun TopControlBar(
                 flashButton()
                 timerAudioButton()
                 gridAssistButton()
+                hollywoodGradeButton()
                 cinemaSettingsQuickButton()
                 settingsButton()
             } else if (cameraMode == CameraMode.VIDEO) {

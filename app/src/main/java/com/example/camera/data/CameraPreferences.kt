@@ -368,6 +368,18 @@ class CameraPreferences(context: Context) {
         get() = prefs.getFloat("pref_cinema_washed_out", 0.0f)
         set(value) = prefs.edit().putFloat("pref_cinema_washed_out", value).apply()
 
+    var cinemaSelectedHollywoodGrade: com.example.camera.model.HollywoodColorGrade
+        get() {
+            val name = prefs.getString("pref_cinema_hollywood_grade", com.example.camera.model.HollywoodColorGrade.OFF.name)
+                ?: com.example.camera.model.HollywoodColorGrade.OFF.name
+            return try { com.example.camera.model.HollywoodColorGrade.valueOf(name) } catch (e: Exception) { com.example.camera.model.HollywoodColorGrade.OFF }
+        }
+        set(value) = prefs.edit().putString("pref_cinema_hollywood_grade", value.name).apply()
+
+    var cinemaGradeIntensity: Float
+        get() = prefs.getFloat("pref_cinema_grade_intensity", 1.0f)
+        set(value) = prefs.edit().putFloat("pref_cinema_grade_intensity", value).apply()
+
     fun getCinemaConfig(): com.example.camera.model.CinemaConfig {
         return com.example.camera.model.CinemaConfig(
             videoFps = cinemaFps,
@@ -375,6 +387,8 @@ class CameraPreferences(context: Context) {
             logBitDepth = cinemaLogBitDepth,
             codec = cinemaCodec,
             selectedLut = cinemaSelectedLut,
+            selectedHollywoodGrade = cinemaSelectedHollywoodGrade,
+            gradeIntensity = cinemaGradeIntensity,
             customLutPath = cinemaCustomLutPath,
             customLutName = cinemaCustomLutName,
             colorProfile = cinemaColorProfile,
@@ -407,6 +421,8 @@ class CameraPreferences(context: Context) {
         cinemaLogBitDepth = config.logBitDepth
         cinemaCodec = config.codec
         cinemaSelectedLut = config.selectedLut
+        cinemaSelectedHollywoodGrade = config.selectedHollywoodGrade
+        cinemaGradeIntensity = config.gradeIntensity
         cinemaCustomLutPath = config.customLutPath
         cinemaCustomLutName = config.customLutName
         cinemaColorProfile = config.colorProfile

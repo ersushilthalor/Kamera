@@ -251,6 +251,82 @@ fun CinemaSettingsWindow(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // SECTION: HOLLYWOOD COLOUR GRADING
+            val activeGradeBadge = if (config.selectedHollywoodGrade == HollywoodColorGrade.OFF) "Off"
+                else "${config.selectedHollywoodGrade.displayName} • ${(config.gradeIntensity * 100).toInt()}%"
+            CinemaSectionHeader(title = "HOLLYWOOD COLOUR GRADING", badge = activeGradeBadge)
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Hollywood Grade Presets Row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                HollywoodColorGrade.entries.forEach { grade ->
+                    val isSelected = config.selectedHollywoodGrade == grade
+                    val gradeColor = if (grade != HollywoodColorGrade.OFF) grade.accentColor else Color(0xFFFFD54F)
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                if (isSelected) gradeColor.copy(alpha = 0.22f)
+                                else Color.White.copy(alpha = 0.05f)
+                            )
+                            .border(
+                                width = if (isSelected) 1.5.dp else 1.dp,
+                                color = if (isSelected) gradeColor else Color.White.copy(alpha = 0.12f),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .clickable { onConfigChange(config.copy(selectedHollywoodGrade = grade)) }
+                            .padding(horizontal = 11.dp, vertical = 7.dp)
+                            .testTag("cinema_hollywood_grade_${grade.id}"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(gradeColor)
+                            )
+                            Text(
+                                text = grade.displayName,
+                                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.75f),
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Grade Intensity Slider (shown when any Hollywood grade is active)
+            AnimatedVisibility(visible = config.selectedHollywoodGrade != HollywoodColorGrade.OFF) {
+                Column(modifier = Modifier.padding(top = 8.dp)) {
+                    CinemaSliderRow(
+                        label = "Grade Intensity (${(config.gradeIntensity * 100).toInt()}%)",
+                        value = config.gradeIntensity,
+                        valueRange = 0.0f..1.0f,
+                        onValueChange = { onConfigChange(config.copy(gradeIntensity = it)) }
+                    )
+                    Text(
+                        text = "${config.selectedHollywoodGrade.subtitle}: ${config.selectedHollywoodGrade.description}",
+                        color = Color.White.copy(alpha = 0.65f),
+                        fontSize = 10.sp,
+                        lineHeight = 13.sp,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             // SECTION 2: LOG & COLOR PROFILE
             CinemaSectionHeader(title = "COLOR PROFILE & LOG", badge = config.colorProfile.name.replace("_", " "))
 
@@ -312,6 +388,7 @@ fun CinemaSettingsWindow(
                     CinemaColorProfile.FLAT_LOG to "Flat Log",
                     CinemaColorProfile.REC_2020 to "Rec.2020 HDR",
                     CinemaColorProfile.APPLE_LOG_2 to "Apple Log 2",
+                    CinemaColorProfile.SAMSUNG_APV_LOG to "Samsung APV Log",
                     CinemaColorProfile.HLG to "HLG Broadcast",
                     CinemaColorProfile.NATIVE to "Natural"
                 ).forEach { (profile, label) ->
@@ -337,12 +414,13 @@ fun CinemaSettingsWindow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 listOf(
+                    CameraResolution(7680, 4320) to "8K MAX",
                     CameraResolution(3840, 2160) to "4K UHD",
                     CameraResolution(1920, 1080) to "1080p FHD",
                     CameraResolution(1280, 720) to "720p HD"
                 ).forEach { (res, label) ->
-                    val isSelected = config.selectedResolution == null && res.width == 3840 ||
-                            config.selectedResolution?.width == res.width
+                    val isSelected = config.selectedResolution?.width == res.width ||
+                            (config.selectedResolution == null && res.width == 3840)
                     CinemaPillChip(
                         label = label,
                         isSelected = isSelected,

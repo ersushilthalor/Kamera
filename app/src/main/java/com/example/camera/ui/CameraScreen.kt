@@ -174,6 +174,7 @@ fun CameraScreen(
     val selectedPhotoFilter by viewModel.selectedPhotoFilter.collectAsStateWithLifecycle()
     val isPhotoFilterBarOpen by viewModel.isPhotoFilterBarOpen.collectAsStateWithLifecycle()
     val isPortraitStyleBarOpen by viewModel.isPortraitStyleBarOpen.collectAsStateWithLifecycle()
+    val isHollywoodGradeBarOpen by viewModel.isHollywoodGradeBarOpen.collectAsStateWithLifecycle()
 
     val videoCodec by viewModel.videoCodec.collectAsStateWithLifecycle()
     val jpegQuality by viewModel.jpegQuality.collectAsStateWithLifecycle()
@@ -240,7 +241,7 @@ fun CameraScreen(
         }
     }
 
-    val isAnyWindowOpen = isPhotoFilterBarOpen || isPortraitStyleBarOpen ||
+    val isAnyWindowOpen = isPhotoFilterBarOpen || isPortraitStyleBarOpen || isHollywoodGradeBarOpen ||
             isCinemaSettingsOpen || isManualProOpen || isMoreModesOpen ||
             (cameraMode == CameraMode.PORTRAIT && isPortraitSettingsOpen) ||
             isVideoSettingsPanelOpen
@@ -414,6 +415,7 @@ fun CameraScreen(
             activePhotoFilter = selectedPhotoFilter,
             selectedPortraitStyle = portraitConfig.selectedStyle,
             onPortraitStyleClick = { viewModel.togglePortraitStyleBar() },
+            onHollywoodGradeClick = { viewModel.toggleHollywoodGradeBar() },
             onCinemaSettingsClick = { viewModel.toggleCinemaSettings() },
             onCinemaEvChange = { ev ->
                 viewModel.updateCinemaConfig(cinemaConfig.copy(exposureCompensation = ev))
@@ -595,6 +597,24 @@ fun CameraScreen(
                 selectedStyle = portraitConfig.selectedStyle,
                 onStyleSelected = { viewModel.setSelectedPortraitStyle(it) },
                 onClose = { viewModel.setPortraitStyleBarOpen(false) }
+            )
+        }
+
+        // 3d4. Hollywood Grade Selector Bar (Cinema Mode)
+        AnimatedVisibility(
+            visible = cameraMode == CameraMode.CINEMA && isHollywoodGradeBarOpen,
+            enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
+            exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 }),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 215.dp)
+        ) {
+            HollywoodGradeSelectorBar(
+                selectedGrade = cinemaConfig.selectedHollywoodGrade,
+                intensity = cinemaConfig.gradeIntensity,
+                onGradeSelected = { viewModel.setHollywoodGrade(it) },
+                onIntensityChange = { viewModel.setGradeIntensity(it) },
+                onClose = { viewModel.setHollywoodGradeBarOpen(false) }
             )
         }
 

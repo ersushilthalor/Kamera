@@ -28,7 +28,8 @@ enum class CinemaColorProfile(
     FLAT_LOG("Flat", "Logarithmic dynamic range curve for color grading", "Flat Log"),
     REC_2020("Rec.2020", "ITU-R BT.2020 wide color gamut transfer curve", "BT.2020"),
     HLG("HLG", "ITU-R BT.2100 Hybrid Log-Gamma HDR profile", "HLG"),
-    APPLE_LOG_2("Apple Log 2", "Apple Log 2 wide-gamut log transfer curve with extended highlight latitude and parabolic shadow retention", "Apple Log 2")
+    APPLE_LOG_2("Apple Log 2", "Apple Log 2 wide-gamut log transfer curve with extended highlight latitude and parabolic shadow retention", "Apple Log 2"),
+    SAMSUNG_APV_LOG("Samsung APV Log", "Samsung Advanced Professional Video Log with wide dynamic range and extended shadow/highlight latitude", "APV Log")
 }
 
 enum class CinemaColorSpace(val label: String) {
@@ -60,6 +61,8 @@ data class CinemaConfig(
     val logBitDepth: LogBitDepth = LogBitDepth.BIT_10,
     val codec: CinemaCodec = CinemaCodec.H265,
     val selectedLut: CinematicLut = CinematicLut.REC_709, // Default Rec.709 as requested
+    val selectedHollywoodGrade: HollywoodColorGrade = HollywoodColorGrade.OFF,
+    val gradeIntensity: Float = 1.0f, // 0.0f (original) to 1.0f (full grade)
     val customLutPath: String? = null,
     val customLutName: String? = null,
     val colorProfile: CinemaColorProfile = CinemaColorProfile.FLAT_LOG,

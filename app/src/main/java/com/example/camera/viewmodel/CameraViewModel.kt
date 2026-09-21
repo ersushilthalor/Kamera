@@ -249,6 +249,27 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         preferences.saveCinemaConfig(config)
     }
 
+    fun setHollywoodGrade(grade: com.example.camera.model.HollywoodColorGrade) {
+        val current = engine.cinemaConfig.value
+        updateCinemaConfig(current.copy(selectedHollywoodGrade = grade))
+    }
+
+    fun setGradeIntensity(intensity: Float) {
+        val current = engine.cinemaConfig.value
+        updateCinemaConfig(current.copy(gradeIntensity = intensity.coerceIn(0f, 1f)))
+    }
+
+    private val _isHollywoodGradeBarOpen = MutableStateFlow(false)
+    val isHollywoodGradeBarOpen: StateFlow<Boolean> = _isHollywoodGradeBarOpen.asStateFlow()
+
+    fun toggleHollywoodGradeBar() {
+        _isHollywoodGradeBarOpen.value = !_isHollywoodGradeBarOpen.value
+    }
+
+    fun setHollywoodGradeBarOpen(open: Boolean) {
+        _isHollywoodGradeBarOpen.value = open
+    }
+
     // --- Custom Image Processing Pipeline (RAW/YUV Uncompressed Processing) ---
     private val _isCustomPipelineEnabled = MutableStateFlow(preferences.isCustomPipelineEnabled)
     val isCustomPipelineEnabled: StateFlow<Boolean> = _isCustomPipelineEnabled.asStateFlow()

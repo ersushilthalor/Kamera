@@ -291,6 +291,7 @@ class CinemaEngine(private val context: Context) {
                     CinemaColorProfile.HLG -> 1.8f
                     CinemaColorProfile.REC_2020 -> 2.1f
                     CinemaColorProfile.APPLE_LOG_2 -> 1.60f
+                    CinemaColorProfile.SAMSUNG_APV_LOG -> 1.58f
                 }
                 val lutContrastOffset = if (lutForIsp != CinematicLut.NONE) (lutForIsp.contrast - 1.0f) * 0.3f else 0.0f
                 val washedOutOffset = config.washedOut * 0.35f
@@ -607,6 +608,11 @@ class CinemaEngine(private val context: Context) {
                 }
                 y.coerceIn(0f, 1f)
             }
+            CinemaColorProfile.SAMSUNG_APV_LOG -> {
+                // Samsung APV Log curve: wide dynamic range, lifted shadow pedestal (0.14), logarithmic midtones
+                val logVal = ln(1f + 16.0f * inVal) / ln(17.0f)
+                (0.14f + 0.80f * logVal).coerceIn(0f, 1f)
+            }
         }
     }
 
@@ -638,8 +644,8 @@ class CinemaEngine(private val context: Context) {
             )
         }
 
-        // Apple Log 2 uses BT.2020 wide-gamut primaries natively for grading latitude
-        val effectiveBase = if (profile == CinemaColorProfile.APPLE_LOG_2 && colorSpace == CinemaColorSpace.REC_709) {
+        // Apple Log 2 and Samsung APV Log use BT.2020 wide-gamut primaries natively for grading latitude
+        val effectiveBase = if ((profile == CinemaColorProfile.APPLE_LOG_2 || profile == CinemaColorProfile.SAMSUNG_APV_LOG) && colorSpace == CinemaColorSpace.REC_709) {
             floatArrayOf(
                 0.6274f, 0.3293f, 0.0433f,
                 0.0691f, 0.9195f, 0.0114f,
@@ -656,6 +662,7 @@ class CinemaEngine(private val context: Context) {
             CinemaColorProfile.FLAT_LOG -> 0.88f // Flat desaturated base for pure Log
             CinemaColorProfile.REC_2020 -> 1.0f
             CinemaColorProfile.APPLE_LOG_2 -> 0.88f // Flat wide-gamut baseline for grading headroom
+            CinemaColorProfile.SAMSUNG_APV_LOG -> 0.90f // Samsung APV Log baseline for grading headroom
         }
         // Washed-out restoration adds intelligent chroma vibrance without harsh clipping
         val washedOutChromaBoost = 1.0f + (washedOut * 0.35f)
