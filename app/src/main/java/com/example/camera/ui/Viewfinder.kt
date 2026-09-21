@@ -96,21 +96,6 @@ fun Viewfinder(
     var zoomHideJob by remember { mutableStateOf<Job?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
-    var activeTextureView by remember { mutableStateOf<TextureView?>(null) }
-    var lockedSubjectBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-
-    LaunchedEffect(isRefocusBurstActive) {
-        if (isRefocusBurstActive) {
-            try {
-                activeTextureView?.bitmap?.let { bmp ->
-                    lockedSubjectBitmap = bmp
-                }
-            } catch (ignored: Exception) {}
-        } else {
-            lockedSubjectBitmap = null
-        }
-    }
-
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
@@ -192,7 +177,6 @@ fun Viewfinder(
                 AndroidView(
                     factory = { context ->
                         TextureView(context).apply {
-                            activeTextureView = this
                             surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                                 override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
                                     onSurfaceTextureAvailable(st)
@@ -210,7 +194,6 @@ fun Viewfinder(
                         }
                     },
                     update = { textureView ->
-                        activeTextureView = textureView
                         val effectiveLut = activeLut ?: cinemaConfig?.selectedLut
 
                         val colorMatrix = android.graphics.ColorMatrix()
@@ -252,18 +235,6 @@ fun Viewfinder(
                     },
                     modifier = Modifier.fillMaxSize()
                 )
-
-                // Refocus Freeze Subject Overlay:
-                // During burst capture, visually lock the live preview on the user's selected SUBJECT.
-                // Ensures 0 focus hunting, 0 blur transition, and 0 jumps in the preview.
-                if (isRefocusBurstActive && lockedSubjectBitmap != null) {
-                    androidx.compose.foundation.Image(
-                        bitmap = lockedSubjectBitmap!!.asImageBitmap(),
-                        contentDescription = "Refocus Locked Subject",
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
 
                 // Clean Cinematic LUT Active Badge
                 val badgeLut = activeLut ?: cinemaConfig?.selectedLut

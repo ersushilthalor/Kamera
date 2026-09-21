@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
+import android.util.Range
 import android.view.Surface
 import java.io.File
 import java.nio.ByteBuffer
@@ -31,6 +32,16 @@ private const val TAG = "Realtime8kRecorder"
  * - Zero/low-copy GPU pipeline with reusable direct FloatBuffers and OES external textures.
  * - No silent fallback to 4K on encoder failure.
  */
+data class Supported8kEncoder(
+    val codecName: String,
+    val mimeType: String,
+    val isHardware: Boolean,
+    val maxFps: Int,
+    val minFps: Int,
+    val minBitrate: Int,
+    val maxBitrate: Int
+)
+
 class Realtime8kUpscaleRecorder(private val context: Context) {
 
     private val isRecording = AtomicBoolean(false)
@@ -105,6 +116,105 @@ class Realtime8kUpscaleRecorder(private val context: Context) {
             }
     }
 
+    companion object {
+        fun findSupported8kEncoders(): List<Supported8kEncoder> {
+            val list = mutableListOf<Supported8kEncoder>()
+            val codecList = try {
+                MediaCodecList(MediaCodecList.ALL_CODECS)
+            } catch (e: Exception) {
+                Log.w(TAG, "MediaCodecList query failed", e)
+                return emptyList()
+            }
+
+            val candidateMimes = listOf(
+                MediaFormat.MIMETYPE_VIDEO_HEVC,
+                MediaFormat.MIMETYPE_VIDEO_AV1,
+                MediaFormat.MIMETYPE_VIDEO_AVC,
+                MediaFormat.MIMETYPE_VIDEO_VP9
+            )
+
+            for (info in codecList.codecInfos) {
+                if (!info.isEncoder) continue
+
+                val isHw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    info.isHardwareAccelerated
+                } else {
+                    !info.name.startsWith("OMX.google.", ignoreCase = true) &&
+                    !info.name.startsWith("c2.android.", ignoreCase = true)
+                }
+
+                for (mime in candidateMimes) {
+                    val caps = try {
+                        info.getCapabilitiesForType(mime)
+                    } catch (e: Exception) {
+                        null
+                    } ?: continue
+
+                    // Surface input is mandatory
+                    val hasSurface = caps.colorFormats.contains(MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+                    if (!hasSurface) continue
+
+                    val videoCaps = caps.videoCapabilities ?: continue
+                    val supports8k = try {
+                        videoCaps.isSizeSupported(7680, 4320)
+                    } catch (e: Exception) {
+                        false
+                    }
+                    if (!supports8k) continue
+
+                    val fpsRange = try {
+                        videoCaps.getSupportedFrameRatesFor(7680, 4320)
+                    } catch (e: Exception) {
+                        null
+                    }
+                    val maxFps = fpsRange?.upper?.toInt()?.coerceAtLeast(1) ?: 30
+                    val minFps = fpsRange?.lower?.toInt()?.coerceAtLeast(1) ?: 1
+
+                    val bitrateRange = try {
+                        videoCaps.bitrateRange
+                    } catch (e: Exception) {
+                        null
+                    }
+                    val minBitrate = bitrateRange?.lower ?: 1_000_000
+                    val maxBitrate = bitrateRange?.upper ?: 100_000_000
+
+                    list.add(
+                        Supported8kEncoder(
+                            codecName = info.name,
+                            mimeType = mime,
+                            isHardware = isHw,
+                            maxFps = maxFps,
+                            minFps = minFps,
+                            minBitrate = minBitrate,
+                            maxBitrate = maxBitrate
+                        )
+                    )
+                }
+            }
+
+            // Prefer Hardware first, then HEVC > AV1 > AVC > VP9
+            return list.sortedWith(
+                compareByDescending<Supported8kEncoder> { it.isHardware }
+                    .thenBy {
+                        when (it.mimeType) {
+                            MediaFormat.MIMETYPE_VIDEO_HEVC -> 0
+                            MediaFormat.MIMETYPE_VIDEO_AV1 -> 1
+                            MediaFormat.MIMETYPE_VIDEO_AVC -> 2
+                            MediaFormat.MIMETYPE_VIDEO_VP9 -> 3
+                            else -> 4
+                        }
+                    }
+            )
+        }
+
+        fun findBest8kEncoder(): Supported8kEncoder? = findSupported8kEncoders().firstOrNull()
+
+        fun is8kSupported(): Boolean = findBest8kEncoder() != null
+    }
+
+    fun is8kSupported(): Boolean = Companion.is8kSupported()
+    fun getSupported8kEncoder(): Supported8kEncoder? = Companion.findBest8kEncoder()
+
     /**
      * Starts real-time 8K recording.
      * Returns the 4K [Surface] that Camera2 capture session should attach to.
@@ -121,99 +231,115 @@ class Realtime8kUpscaleRecorder(private val context: Context) {
             throw IllegalStateException("8K recorder is already active")
         }
 
+        val encoder = Companion.findBest8kEncoder() ?: throw UnsupportedOperationException(
+            "Device does not have a video encoder supporting 7680×4320 (8K) surface input. 8K recording is unsupported on this hardware."
+        )
+
         destOutputFile = destFile
         isMuxerStarted = false
         videoTrackIndex = -1
 
-        // Initialize 8K HEVC Encoder
-        val inputSurface = initEncoder(destFile, fps, bitrate, isAudioEnabled, orientationHint)
-        encoderInputSurface = inputSurface
+        try {
+            // Initialize 8K Encoder dynamically based on verified hardware capabilities
+            val inputSurface = initEncoder(encoder, destFile, fps, bitrate, isAudioEnabled, orientationHint)
+            encoderInputSurface = inputSurface
 
-        // Setup EGL and GPU upscale pipeline
-        initEgl(inputSurface)
-        initGl(colorMatrix)
+            // Setup EGL and GPU upscale pipeline
+            initEgl(inputSurface)
+            initGl(colorMatrix)
 
-        // Setup HandlerThread for real-time GPU frame rendering
-        val thread = HandlerThread("8kUpscaleRenderThread").apply { start() }
-        renderThread = thread
-        val handler = Handler(thread.looper)
-        renderHandler = handler
+            // Setup HandlerThread for real-time GPU frame rendering
+            val thread = HandlerThread("8kUpscaleRenderThread").apply { start() }
+            renderThread = thread
+            val handler = Handler(thread.looper)
+            renderHandler = handler
 
-        isRecording.set(true)
+            isRecording.set(true)
 
-        // Listen for new 4K frames from Camera2
-        cameraSurfaceTexture?.setOnFrameAvailableListener({
-            if (!isRecording.get()) return@setOnFrameAvailableListener
-            handler.post {
-                renderUpscaledFrame()
-            }
-        }, handler)
+            // Listen for new 4K frames from Camera2
+            cameraSurfaceTexture?.setOnFrameAvailableListener({
+                if (!isRecording.get()) return@setOnFrameAvailableListener
+                handler.post {
+                    renderUpscaledFrame()
+                }
+            }, handler)
 
-        return cameraInputSurface ?: throw IllegalStateException("Camera input surface not created")
+            return cameraInputSurface ?: throw IllegalStateException("Camera input surface not created")
+        } catch (e: Exception) {
+            cancelRecording()
+            throw e
+        }
     }
 
     private fun initEncoder(
+        encoder: Supported8kEncoder,
         destFile: File,
         fps: Int,
         bitrate: Int,
         isAudioEnabled: Boolean,
         orientationHint: Int
     ): Surface {
-        // Try MediaRecorder with 7680x4320 HEVC
-        try {
-            val mr = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                MediaRecorder(context)
-            } else {
-                @Suppress("DEPRECATION")
-                MediaRecorder()
-            }
-            if (isAudioEnabled) {
-                try {
-                    mr.setAudioSource(MediaRecorder.AudioSource.MIC)
-                } catch (e: Exception) {
-                    Log.w(TAG, "AudioSource.MIC unavailable", e)
+        val targetFps = fps.coerceIn(encoder.minFps, encoder.maxFps)
+        val targetBitrate = bitrate.coerceIn(encoder.minBitrate, encoder.maxBitrate)
+
+        // If preferred encoder is HEVC, try MediaRecorder first for unified A/V MP4 recording
+        if (encoder.mimeType == MediaFormat.MIMETYPE_VIDEO_HEVC) {
+            try {
+                val mr = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    MediaRecorder(context)
+                } else {
+                    @Suppress("DEPRECATION")
+                    MediaRecorder()
                 }
-            }
-            mr.setVideoSource(MediaRecorder.VideoSource.SURFACE)
-            mr.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            mr.setOutputFile(destFile.absolutePath)
-            mr.setVideoEncodingBitRate(bitrate)
-            mr.setVideoFrameRate(fps)
-            mr.setVideoSize(7680, 4320)
-            mr.setVideoEncoder(MediaRecorder.VideoEncoder.HEVC)
-            if (isAudioEnabled) {
-                try {
-                    mr.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                    mr.setAudioSamplingRate(48000)
-                    mr.setAudioEncodingBitRate(192000)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Audio encoder config fallback", e)
+                if (isAudioEnabled) {
+                    try {
+                        mr.setAudioSource(MediaRecorder.AudioSource.MIC)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "AudioSource.MIC unavailable", e)
+                    }
                 }
+                mr.setVideoSource(MediaRecorder.VideoSource.SURFACE)
+                mr.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                mr.setOutputFile(destFile.absolutePath)
+                mr.setVideoEncodingBitRate(targetBitrate)
+                mr.setVideoFrameRate(targetFps)
+                mr.setVideoSize(7680, 4320)
+                mr.setVideoEncoder(MediaRecorder.VideoEncoder.HEVC)
+                if (isAudioEnabled) {
+                    try {
+                        mr.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                        mr.setAudioSamplingRate(48000)
+                        mr.setAudioEncodingBitRate(192000)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Audio encoder config fallback", e)
+                    }
+                }
+                mr.setOrientationHint(orientationHint)
+                mr.prepare()
+                mr.start()
+                mediaRecorder = mr
+                Log.i(TAG, "Initialized 8K MediaRecorder pipeline at 7680x4320 HEVC using ${encoder.codecName}")
+                return mr.surface
+            } catch (e: Exception) {
+                Log.w(TAG, "MediaRecorder 8K initialization failed, attempting direct MediaCodec (${encoder.codecName})", e)
+                try { mediaRecorder?.reset() } catch (ignored: Exception) {}
+                try { mediaRecorder?.release() } catch (ignored: Exception) {}
+                mediaRecorder = null
             }
-            mr.setOrientationHint(orientationHint)
-            mr.prepare()
-            mr.start()
-            mediaRecorder = mr
-            Log.i(TAG, "Initialized 8K MediaRecorder pipeline at 7680x4320 HEVC")
-            return mr.surface
-        } catch (e: Exception) {
-            Log.w(TAG, "MediaRecorder 8K initialization failed, attempting MediaCodec fallback", e)
-            try { mediaRecorder?.release() } catch (ignored: Exception) {}
-            mediaRecorder = null
         }
 
-        // Fallback: MediaCodec + MediaMuxer HEVC at 7680x4320
+        // Direct hardware MediaCodec pipeline using the validated encoder
         try {
-            val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_HEVC, 7680, 4320).apply {
+            val format = MediaFormat.createVideoFormat(encoder.mimeType, 7680, 4320).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-                setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
-                setInteger(MediaFormat.KEY_FRAME_RATE, fps)
+                setInteger(MediaFormat.KEY_BIT_RATE, targetBitrate)
+                setInteger(MediaFormat.KEY_FRAME_RATE, targetFps)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    setInteger(MediaFormat.KEY_MAX_FPS_TO_ENCODER, fps)
+                    setInteger(MediaFormat.KEY_MAX_FPS_TO_ENCODER, targetFps)
                 }
             }
-            val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_HEVC)
+            val codec = MediaCodec.createByCodecName(encoder.codecName)
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             val surface = codec.createInputSurface()
             codec.start()
@@ -224,17 +350,16 @@ class Realtime8kUpscaleRecorder(private val context: Context) {
             mediaCodec = codec
             mediaMuxer = muxer
 
-            // Start draining MediaCodec packets into MediaMuxer
             startCodecDrainThread(codec, muxer)
-            Log.i(TAG, "Initialized 8K MediaCodec pipeline at 7680x4320 HEVC")
+            Log.i(TAG, "Initialized 8K MediaCodec pipeline with ${encoder.codecName} (${encoder.mimeType}) at 7680x4320 @ ${targetFps}fps")
             return surface
         } catch (e: Exception) {
-            Log.e(TAG, "MediaCodec 8K initialization also failed", e)
+            Log.e(TAG, "MediaCodec 8K initialization failed for ${encoder.codecName}", e)
             try { mediaCodec?.release() } catch (ignored: Exception) {}
             try { mediaMuxer?.release() } catch (ignored: Exception) {}
             mediaCodec = null
             mediaMuxer = null
-            throw IllegalStateException("8K HEVC hardware encoder (7680x4320) initialization failed: device hardware encoder does not support 8K HEVC", e)
+            throw IllegalStateException("8K encoder (${encoder.codecName}, 7680x4320) initialization failed: ${e.message}", e)
         }
     }
 
@@ -498,22 +623,30 @@ class Realtime8kUpscaleRecorder(private val context: Context) {
     }
 
     fun cancelRecording() {
-        if (isRecording.compareAndSet(true, false)) {
-            cameraSurfaceTexture?.setOnFrameAvailableListener(null)
-            try { mediaRecorder?.stop() } catch (ignored: Exception) {}
-            try { mediaRecorder?.release() } catch (ignored: Exception) {}
-            mediaRecorder = null
-            try { mediaCodec?.stop() } catch (ignored: Exception) {}
-            try { mediaCodec?.release() } catch (ignored: Exception) {}
-            mediaCodec = null
-            try { mediaMuxer?.release() } catch (ignored: Exception) {}
-            mediaMuxer = null
-            cleanUpEgl()
-            renderThread?.quitSafely()
-            renderThread = null
-            renderHandler = null
-            destOutputFile?.delete()
-        }
+        isRecording.set(false)
+        cameraSurfaceTexture?.setOnFrameAvailableListener(null)
+        try { mediaRecorder?.stop() } catch (ignored: Exception) {}
+        try { mediaRecorder?.release() } catch (ignored: Exception) {}
+        mediaRecorder = null
+        try { drainThread?.interrupt() } catch (ignored: Exception) {}
+        drainThread = null
+        try { mediaCodec?.stop() } catch (ignored: Exception) {}
+        try { mediaCodec?.release() } catch (ignored: Exception) {}
+        mediaCodec = null
+        try {
+            if (isMuxerStarted) {
+                mediaMuxer?.stop()
+            }
+        } catch (ignored: Exception) {}
+        try { mediaMuxer?.release() } catch (ignored: Exception) {}
+        mediaMuxer = null
+        isMuxerStarted = false
+        cleanUpEgl()
+        renderThread?.quitSafely()
+        renderThread = null
+        renderHandler = null
+        try { destOutputFile?.delete() } catch (ignored: Exception) {}
+        destOutputFile = null
     }
 
     private fun cleanUpEgl() {

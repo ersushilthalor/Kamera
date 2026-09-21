@@ -3094,15 +3094,7 @@ class Camera2Engine(private val context: Context) {
         val isCompleted = java.util.concurrent.atomic.AtomicBoolean(false)
         val actualCapturedDiopters = FloatArray(frameCount) { focusPlanes[it] }
 
-        // Lock live preview so focus changes (Near/Far) are internal to capture pipeline only.
-        // The live preview remains visually locked on SUBJECT throughout the entire burst.
-        motorolaSwitchEngine.compositor.isPreviewFocusLocked = true
-        _isRefocusBurstActive.value = true
         val originalAfMode = previewRequestBuilder?.get(CaptureRequest.CONTROL_AF_MODE) ?: CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
-
-        try {
-            session.stopRepeating()
-        } catch (ignored: Exception) {}
 
         fun restorePreviewAf() {
             try {
@@ -3117,12 +3109,7 @@ class Camera2Engine(private val context: Context) {
             } catch (e: Exception) {
                 Log.w(TAG, "Failed restoring repeating preview after refocus burst", e)
             } finally {
-                motorolaSwitchEngine.compositor.isPreviewFocusLocked = false
-                motorolaSwitchEngine.compositor.triggerRender()
-                engineScope.launch(Dispatchers.Main) {
-                    kotlinx.coroutines.delay(60)
-                    _isRefocusBurstActive.value = false
-                }
+                _isRefocusBurstActive.value = false
             }
         }
 
@@ -3921,6 +3908,13 @@ class Camera2Engine(private val context: Context) {
             }
 
             val is8kRequested = (requestedRes.width >= 7680 || requestedRes.height >= 4320)
+            if (is8kRequested && !realtime8kUpscaleRecorder.is8kSupported()) {
+                isCurrentRecording8K = false
+                _isRecordingVideo.value = false
+                isStartingRecording.set(false)
+                onError("8K Recording Unsupported: This device hardware does not support 7680×4320 video encoding.")
+                return
+            }
             isCurrentRecording8K = is8kRequested
 
             val supportedVideoSizes = map?.getOutputSizes(MediaRecorder::class.java)
@@ -4054,10 +4048,13 @@ class Camera2Engine(private val context: Context) {
                     )
                 } catch (e: Exception) {
                     Log.e(TAG, "8K Real-Time Upscale encoder failed", e)
+                    realtime8kUpscaleRecorder.cancelRecording()
+                    try { tempFile.delete() } catch (ignored: Exception) {}
+                    currentRecordingTempFile = null
                     isCurrentRecording8K = false
                     _isRecordingVideo.value = false
                     isStartingRecording.set(false)
-                    onError("8K Real-Time Upscale Error: Device 8K HEVC hardware encoder initialization failed. Recording aborted.")
+                    onError("8K Real-Time Upscale Error: ${e.message ?: "Failed to initialize 8K video encoder. Recording aborted."}")
                     return
                 }
             } else if (isSoftwareCinema) {
